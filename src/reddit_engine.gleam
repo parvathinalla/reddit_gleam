@@ -644,8 +644,6 @@ fn vote_post(state: EngineState, voter: String, post_id: Int, delta: Int, new_op
     False -> list.append(state.votes, [VoteEntry(post_id, voter, new_value)])
   }
 
-  // Debugging prints removed
-
   // Also update the global_posts list to reflect the changed post score if present.
   let updated_global = case maybe_post {
     Found(p) -> case p { reddit_types.Post(id_p, _author_p, _sub_p, _t, _b, _s, _c, _ts) ->
