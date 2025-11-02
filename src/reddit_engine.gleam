@@ -377,17 +377,37 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
         }
       }
     }
-  }
-}
-
-// Gather all posts across subreddits
-fn collect_all_posts(subs: List(SubredditEntry)) -> List(reddit_types.Post) {
-  // list.fold takes (acc, element) -> acc
-  list.fold(subs, list.new(), fn(acc, entry) {
-    case entry {
-      SubredditEntry(_, subreddit) -> list.append(acc, subreddit.posts)
+    reddit_types.SendDirectMessage(from, to, body) -> {
+      let _ = reddit_metrics.log_event("SendDirectMessage from " <> from <> " to " <> to)
+      // Find recipient and add message to their inbox
+      let new_users = list.map(state.users, fn(entry) {
+        case entry {
+          UserEntry(name, u) -> case name == to {
+            True -> {
+              let msg = reddit_types.DirectMessage(from, to, body, new_ops)
+              let new_inbox = list.append(u.inbox, [msg])
+              UserEntry(name, reddit_types.User(u.name, u.karma, new_inbox, u.subreddits, u.password))
+            }
+            False -> entry
+          }
+        }
+      })
+      let new_state = EngineState(new_users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
+      EngineResult(new_state, reddit_types.Ok)
     }
-  })
+
+    reddit_types.GetDirectMessages(user) -> {
+      let _ = reddit_metrics.log_event("GetDirectMessages for " <> user)
+      let maybe_user = find_user(state.users, user)
+      case maybe_user {
+        UserNotFound -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("user_not_found"))
+        UserFound(u) -> {
+          let new_state = EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
+          EngineResult(new_state, reddit_types.DirectMessages(u.inbox))
+        }
+      }
+    }
+  }
 }
 
 // Sort posts by timestamp descending (newest first) using insertion for simplicity.
@@ -403,20 +423,6 @@ fn insert_sorted(sorted_acc, p) {
 
 fn sort_posts_by_ts_desc(posts: List(reddit_types.Post)) -> List(reddit_types.Post) {
   list.fold(posts, list.new(), fn(acc, p) { insert_sorted(acc, p) })
-}
-
-// Collect posts for a specific subreddit
-fn collect_subreddit_posts(subs: List(SubredditEntry), name: String) -> List(reddit_types.Post) {
-  let matches = list.filter(subs, fn(e) { case e { SubredditEntry(n, _) -> n == name } })
-  // Map matching subreddit entries to their posts lists, then pick the first non-empty posts list
-  let posts_lists = list.map(matches, fn(entry) { case entry { SubredditEntry(_, subreddit) -> subreddit.posts } })
-  let found = list.fold(posts_lists, list.new(), fn(acc, l) {
-    case acc {
-      [] -> l
-      _ -> acc
-    }
-  })
-  found
 }
 
 // Find a post by id
@@ -454,18 +460,6 @@ fn find_user(users: List(UserEntry), name: String) -> MaybeUser {
     case acc {
       UserFound(_) -> acc
       UserNotFound -> case e { UserEntry(n, u) -> case n == name { True -> UserFound(u) False -> UserNotFound } }
-    }
-  })
-}
-
-// Collect posts for a set of subreddit names
-fn collect_posts_for_subs(subs: List(SubredditEntry), allowed: List(String)) -> List(reddit_types.Post) {
-  list.fold(subs, list.new(), fn(acc, entry) {
-    case entry {
-      SubredditEntry(n, subreddit) -> {
-        let keep = list.any(allowed, fn(a) { a == n })
-        case keep { True -> list.append(acc, subreddit.posts) False -> acc }
-      }
     }
   })
 }
@@ -551,11 +545,11 @@ fn leave_sub(state: EngineState, user: String, subreddit_name: String, new_ops: 
   })
 
   // Remove any subreddit entries that now have zero members.
-  let final_subs = list.filter(updated, fn(entry) { case entry { SubredditEntry(_, subreddit) -> list.length(subreddit.members) > 0 } })
+  let final_subs = list.filter(updated, fn(entry) { case entry { SubredditEntry(_, subreddit) -> subreddit.members == [] } })
 
   // Determine which subreddits were removed (members went to zero)
   let removed = list.fold(updated, list.new(), fn(acc, entry) {
-    case entry { SubredditEntry(n, subreddit) -> case list.length(subreddit.members) == 0 { True -> list.append(acc, [n]) False -> acc } }
+    case entry { SubredditEntry(n, subreddit) -> case subreddit.members == [] { True -> list.append(acc, [n]) False -> acc } }
   })
 
   // Filter out posts that belonged to removed subreddits from global_posts

@@ -4,16 +4,12 @@ pub type User {
     karma: Int,
     inbox: List(DirectMessage),
     subreddits: List(String),
-    password: String
+    password: String,
   )
 }
 
 pub type Subreddit {
-  Subreddit(
-    name: String,
-    members: List(String),
-    posts: List(Post)
-  )
+  Subreddit(name: String, members: List(String), posts: List(Post))
 }
 
 pub type Post {
@@ -25,7 +21,7 @@ pub type Post {
     body: String,
     score: Int,
     comments: List(Comment),
-    timestamp: Int
+    timestamp: Int,
   )
 }
 
@@ -36,23 +32,16 @@ pub type Comment {
     body: String,
     score: Int,
     replies: List(Comment),
-    timestamp: Int
+    timestamp: Int,
   )
 }
 
 pub type DirectMessage {
-  DirectMessage(
-    from: String,
-    to: String,
-    body: String
-  )
+  DirectMessage(from: String, to: String, body: String, timestamp: Int)
 }
 
 pub type ClientConfig {
-  ClientConfig(
-    ai_model: String,
-    ai_model_enabled: Bool
-  )
+  ClientConfig(ai_model: String, ai_model_enabled: Bool)
 }
 
 // Messages that can be sent to the engine.
@@ -69,7 +58,14 @@ pub type EngineMsg {
   GetSubFeed(subreddit: String) // return posts for a subreddit
   GetPost(post_id: Int) // fetch a single post + comments
   // Commenting: parent_comment_id = 0 indicates root comment
-  CreateComment(author: String, post_id: Int, parent_comment_id: Int, body: String)
+  CreateComment(
+    author: String,
+    post_id: Int,
+    parent_comment_id: Int,
+    body: String,
+  )
+  SendDirectMessage(from: String, to: String, body: String)
+  GetDirectMessages(user: String)
 }
 
 // Replies the engine can return for a request.
@@ -81,4 +77,5 @@ pub type EngineReply {
   PostsPage(List(Post), Int, Int, Int) // posts, page, page_size, total
   PostData(Post)
   UserData(User)
+  DirectMessages(List(DirectMessage))
 }
