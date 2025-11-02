@@ -354,11 +354,18 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
             _ -> find_post(new_subs, post_id)
           }
           let updated_global = case maybe_updated {
-            Found(p) -> list.map(state.global_posts, fn(gp) {
-              case gp { reddit_types.Post(id_g, author_g, sub_g, title_g, body_g, score_g, comments_g, ts_g) ->
-                case id_g == (case p { reddit_types.Post(id_p, _, _, _, _, _, _, _) -> id_p }) { True -> p False -> gp }
-              }
-            })
+            Found(p) -> case p {
+              reddit_types.Post(id_p, _, _, _, _, _, _, _) ->
+                list.map(state.global_posts, fn(gp) {
+                  case gp {
+                    reddit_types.Post(id_g, _, _, _, _, _, _, _) ->
+                      case id_g == id_p {
+                        True -> p
+                        False -> gp
+                      }
+                  }
+                })
+            }
             NotFound -> state.global_posts
           }
           let new_state = EngineState(state.users, new_subs, state.votes, updated_global, state.post_id_counter, new_comment_id, new_ops)
@@ -553,7 +560,9 @@ fn leave_sub(state: EngineState, user: String, subreddit_name: String, new_ops: 
 
   // Filter out posts that belonged to removed subreddits from global_posts
   let new_global = list.filter(state.global_posts, fn(p) {
-    case p { reddit_types.Post(_id, _author, sub_name, _t, _b, _score, _comments, _ts) -> not list.any(removed, fn(r) { r == sub_name }) }
+    let reddit_types.Post(_, _, sub_name, _, _, _, _, _) = p
+    let keep = !list.any(removed, fn(r) { r == sub_name })
+    keep
   })
 
   EngineState(state.users, final_subs, state.votes, new_global, state.post_id_counter, state.comment_id_counter, new_ops)
