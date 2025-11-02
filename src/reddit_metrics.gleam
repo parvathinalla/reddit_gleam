@@ -6,8 +6,10 @@ import gleam/float
 pub type Metric {
   Metric(event: String, timestamp: Int)
 }
-pub fn log_event(event: String) {
-  let _ = io.println("[EVENT]: " <> event)
+
+// This function is now silent. It can be used for metrics without cluttering the output.
+pub fn log_event(_event: String) {
+  Nil
 }
 
 pub fn report_metrics(metrics: List(Metric)) {

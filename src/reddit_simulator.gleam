@@ -1,3 +1,4 @@
+import gleam/string
 import reddit_engine
 import reddit_types
 import gleam/list
@@ -39,6 +40,7 @@ pub fn run_simulator(user_count: Int) {
   // start with an empty engine state and no last-post tracked
   let initial_state = reddit_engine.EngineState(list.new(), list.new(), list.new(), list.new(), 0, 0, 0)
   let subreddits = ["r/gleam", "r/programming", "r/gaming", "r/news", "r/memes"]
+  io.println("Created subreddits: " <> string.join(subreddits, ", "))
 
   // Helper to unwrap the returned EngineResult state (always returns EngineResult)
   let unwrap = fn(res, metrics, event) {
@@ -59,6 +61,12 @@ pub fn run_simulator(user_count: Int) {
         let #(s3, m3) = unwrap(reddit_engine.handle_message(s2, reddit_types.JoinSub(name, subreddit_name)), m2, "JoinSub")
         let #(s4, m4) = unwrap(reddit_engine.handle_message(s3, reddit_types.CreatePost(name, subreddit_name, "Hello from " <> name, "simulated post")), m3, "CreatePost")
 
+        // Print a summary for a few users to keep the output clean
+        case i <= 5 {
+          True -> io.println("  - User " <> name <> " joined " <> subreddit_name <> " and created a post.")
+          False -> Nil
+        }
+
         // new post id is s4.post_id_counter
   case s4 { reddit_engine.EngineState(_users, _subs, _votes, _global_posts, post_ctr, _cctr, _ops) ->
           case last_post_id == 0 {
@@ -76,17 +84,23 @@ pub fn run_simulator(user_count: Int) {
   })
 
   case final { SimAcc(state_final, last, metrics) -> {
-    let _ = io.println("Simulation complete. Operations=" <> int.to_string(state_final.operations) <> " last_post=" <> int.to_string(last))
+    io.println("\n...and so on for " <> int.to_string(user_count) <> " users.")
+    io.println("\n--- Simulation Summary ---")
+    io.println("Total users simulated: " <> int.to_string(user_count))
+    io.println("Total posts created: " <> int.to_string(last))
+
     // Test DM functionality
+    io.println("\n--- Direct Message Test ---")
     let #(s_dm1, m_dm1) = unwrap(reddit_engine.handle_message(state_final, reddit_types.SendDirectMessage("user_1", "user_2", "Hello user_2!")), metrics, "SendDirectMessage")
+    io.println("  - user_1 sent a direct message to user_2.")
     let #(s_dm2, m_dm2) = unwrap(reddit_engine.handle_message(s_dm1, reddit_types.GetDirectMessages("user_2")), m_dm1, "GetDirectMessages")
     let res_dm2 = reddit_engine.handle_message(s_dm2, reddit_types.GetDirectMessages("user_2"))
 
     case res_dm2 {
       reddit_engine.EngineResult(_, reply) -> case reply {
         reddit_types.DirectMessages(msgs) -> {
-          io.println("User_2 inbox:")
-          list.each(msgs, fn(dm) { io.println("  From: " <> dm.from <> ", Body: " <> dm.body) })
+          io.println("  - user_2's inbox check:")
+          list.each(msgs, fn(dm) { io.println("    - From: " <> dm.from <> ", Body: '" <> dm.body <> "'") })
         }
         _ -> io.println("Error getting user_2 messages")
       }
