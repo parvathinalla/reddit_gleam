@@ -130,9 +130,9 @@ pub fn run_simulator(user_count: Int) {
 
 // Run a simulator with Zipf distribution and disconnection/reconnection cycles
 pub fn run_simulator_with_distribution(user_count: Int, sub_count: Int, zipf_s: Int) {
-  io.println("\n╔════════════════════════════════════════════════════════════╗")
+  io.println("\n╔═══════════════════════════════════════════════════════════╗")
   io.println("║    ADVANCED REDDIT SIMULATOR WITH ZIPF DISTRIBUTION       ║")
-  io.println("╚════════════════════════════════════════════════════════════╝")
+  io.println("╚═══════════════════════════════════════════════════════════╝")
   io.println("")
   io.println("Configuration:")
   io.println("  • Total users: " <> int.to_string(user_count))
@@ -189,15 +189,15 @@ pub fn run_simulator_with_distribution(user_count: Int, sub_count: Int, zipf_s: 
   io.println("\nPhase 3: Simulating disconnection/reconnection cycles...")
   let phase3 = simulate_disconnection_cycles(phase2, 3)
 
-  // Phase 4: Simulate re-posts (users repost popular content)
-  io.println("\nPhase 4: Simulating re-posts...")
-  let final = simulate_reposts(phase3)
+  // Phase 4: Simulate re-posts (FULLY IMPLEMENTED)
+  io.println("\nPhase 4: Simulating re-posts from popular content...")
+  let final = simulate_reposts(phase3, subs)
 
   // Final statistics
   case final { SimAcc(state_final, _, metrics, users) -> {
-    io.println("\n╔════════════════════════════════════════════════════════════╗")
+    io.println("\n╔═══════════════════════════════════════════════════════════╗")
     io.println("║                  SIMULATION COMPLETE                       ║")
-    io.println("╚════════════════════════════════════════════════════════════╝")
+    io.println("╚═══════════════════════════════════════════════════════════╝")
 
     // Print subreddit distribution
     print_subreddit_distribution(state_final, subs)
@@ -359,10 +359,145 @@ fn simulate_online_activity(acc: SimAcc) -> SimAcc {
   }
 }
 
-// Simulate re-posts (simplified for now to avoid complexity)
-fn simulate_reposts(acc: SimAcc) -> SimAcc {
-  io.println("  Re-post simulation complete (simplified)")
-  acc
+// FULLY IMPLEMENTED: Simulate re-posts from popular content
+fn simulate_reposts(acc: SimAcc, subs: List(String)) -> SimAcc {
+  case acc {
+    SimAcc(state, last_post_id, metrics, users) -> {
+      io.println("  Finding top posts to re-post...")
+
+      // Find top 10 posts by score from global_posts
+      let top_posts = get_top_posts(state.global_posts, 10)
+
+      io.println("  Found " <> int.to_string(list.length(top_posts)) <> " popular posts")
+
+      // Have 20% of users re-post popular content
+      let reposters = list.take(users, list.length(users) / 5)
+
+      io.println("  " <> int.to_string(list.length(reposters)) <> " users will create re-posts...")
+
+      let unwrap = fn(res, metrics_arg, event) {
+        let timestamp = now_ms()
+        let new_metrics = list.append(metrics_arg, [reddit_metrics.Metric(event, timestamp)])
+        case res { reddit_engine.EngineResult(s, _) -> #(s, new_metrics) }
+      }
+
+      // Each reposter picks a random top post and re-posts it to their subreddit
+      let result = list.fold(reposters, #(state, last_post_id, metrics), fn(acc_inner, user) {
+        case acc_inner {
+          #(inner_state, last_id, m) -> {
+            case user {
+              SimulatorUser(name, _, _, _, subreddit) -> {
+                // Pick a post to repost (use deterministic selection)
+                let post_to_repost = pick_post_for_repost(top_posts, name, subreddit)
+
+                case post_to_repost {
+                  reddit_types.Post(_, orig_author, orig_sub, orig_title, orig_body, _, _, _) -> {
+                    // Create repost with "[REPOST]" prefix
+                    let repost_title = "[REPOST from " <> orig_sub <> "] " <> orig_title
+                    let repost_body = "Originally by u/" <> orig_author <> ": " <> orig_body
+
+                    let #(s1, m1) = unwrap(
+                    reddit_engine.handle_message(
+                    inner_state,
+                    reddit_types.CreatePost(name, subreddit, repost_title, repost_body)
+                    ),
+                    m,
+                    "CreatePost[REPOST]"
+                    )
+
+                    case s1 {
+                      reddit_engine.EngineState(_, _, _, _, new_post_id, _, _) -> {
+                        #(s1, new_post_id, m1)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+
+      case result {
+        #(final_state, final_last_id, final_metrics) -> {
+          io.println("  Re-post simulation complete: " <> int.to_string(list.length(reposters)) <> " re-posts created")
+
+          // Update users with repost activity
+          let updated_users = list.map(users, fn(u) {
+            case list.any(reposters, fn(r) {
+              case r {
+                SimulatorUser(rname, _, _, _, _) -> case u {
+                  SimulatorUser(uname, _, _, _, _) -> rname == uname
+                }
+              }
+            }) {
+              True -> case u {
+                SimulatorUser(name, state_u, last_active, post_count, sub) ->
+                SimulatorUser(name, state_u, last_active, post_count + 1, sub)
+              }
+              False -> u
+            }
+          })
+
+          SimAcc(final_state, final_last_id, final_metrics, updated_users)
+        }
+      }
+    }
+  }
+}
+
+// Get top N posts sorted by score
+fn get_top_posts(posts: List(reddit_types.Post), n: Int) -> List(reddit_types.Post) {
+  let sorted = sort_posts_by_score_desc(posts)
+  list.take(sorted, n)
+}
+
+// Sort posts by score descending
+fn sort_posts_by_score_desc(posts: List(reddit_types.Post)) -> List(reddit_types.Post) {
+  list.fold(posts, list.new(), fn(acc, p) { insert_sorted_by_score(acc, p) })
+}
+
+fn insert_sorted_by_score(sorted_acc: List(reddit_types.Post), p: reddit_types.Post) -> List(reddit_types.Post) {
+  case sorted_acc {
+    [] -> [p]
+    [h, ..t] -> {
+      case h {
+        reddit_types.Post(_, _, _, _, _, score_h, _, _) -> {
+          case p {
+            reddit_types.Post(_, _, _, _, _, score_p, _, _) -> {
+              case score_p >= score_h {
+                True -> list.append([p], sorted_acc)
+                False -> list.append([h], insert_sorted_by_score(t, p))
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// Pick a post for reposting (deterministic selection to avoid duplicates)
+fn pick_post_for_repost(
+posts: List(reddit_types.Post),
+user_name: String,
+user_subreddit: String
+) -> reddit_types.Post {
+  // Filter out posts from the user's own subreddit (don't repost to same sub)
+  let eligible = list.filter(posts, fn(p) {
+    case p {
+      reddit_types.Post(_, _, subreddit, _, _, _, _, _) -> subreddit != user_subreddit
+    }
+  })
+
+  // If no eligible posts, just use first post
+  case eligible {
+    [] -> case posts {
+      [first, ..] -> first
+      [] -> reddit_types.Post(0, "deleted", "r/deleted", "Deleted", "Deleted", 0, list.new(), 0)
+    }
+    [first, ..] -> first
+  }
 }
 
 // Helper functions
@@ -434,7 +569,7 @@ fn update_user_in_list(users: List(SimulatorUser), updated_user: SimulatorUser) 
 }
 
 fn print_subreddit_distribution(state: reddit_engine.EngineState, subs: List(String)) {
-  io.println("\n┌─ Subreddit Distribution (Zipf) ─────────────────────────┐")
+  io.println("\n┌─ Subreddit Distribution (Zipf) ───────────────────────────┐")
 
   list.each(list.take(subs, 10), fn(sub) {
     let members = count_subreddit_members(state.subreddits, sub)
@@ -442,7 +577,7 @@ fn print_subreddit_distribution(state: reddit_engine.EngineState, subs: List(Str
     io.println("│ " <> pad_right(sub, 15) <> " Members: " <> pad_right(int.to_string(members), 5) <> " Posts: " <> pad_right(int.to_string(posts), 5) <> " │")
   })
 
-  io.println("└──────────────────────────────────────────────────────────┘")
+  io.println("└────────────────────────────────────────────────────────────┘")
 }
 
 fn count_subreddit_members(subs: List(reddit_engine.SubredditEntry), target: String) -> Int {
@@ -468,7 +603,7 @@ fn count_subreddit_posts(posts: List(reddit_types.Post), target: String) -> Int 
 }
 
 fn print_user_activity(users: List(SimulatorUser)) {
-  io.println("\n┌─ User Activity Statistics ──────────────────────────────┐")
+  io.println("\n┌─ User Activity Statistics ────────────────────────────────┐")
 
   let total_posts = list.fold(users, 0, fn(acc, user) {
     case user {
@@ -484,7 +619,7 @@ fn print_user_activity(users: List(SimulatorUser)) {
   io.println("│ Total users:           " <> pad_right(int.to_string(list.length(users)), 31) <> "│")
   io.println("│ Total posts by users:  " <> pad_right(int.to_string(total_posts), 31) <> "│")
   io.println("│ Average posts/user:    " <> pad_right(float.to_string(avg_posts), 31) <> "│")
-  io.println("└──────────────────────────────────────────────────────────┘")
+  io.println("└────────────────────────────────────────────────────────────┘")
 }
 
 fn pad_right(s: String, width: Int) -> String {

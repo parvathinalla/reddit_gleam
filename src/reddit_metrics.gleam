@@ -14,6 +14,7 @@ pub type DetailedMetrics {
   logins: Int,
   joins: Int,
   posts: Int,
+  reposts: Int,
   comments: Int,
   votes: Int,
   dms: Int,
@@ -48,6 +49,7 @@ pub fn analyze_metrics(metrics: List(Metric)) -> DetailedMetrics {
   let logins = count_events(metrics, "Login")
   let joins = count_events(metrics, "JoinSub")
   let posts = count_events(metrics, "CreatePost")
+  let reposts = count_events(metrics, "CreatePost[REPOST]")
   let comments = count_events(metrics, "CreateComment")
   let votes = count_events(metrics, "Vote")
   let dms = count_events(metrics, "SendDirectMessage")
@@ -57,7 +59,8 @@ pub fn analyze_metrics(metrics: List(Metric)) -> DetailedMetrics {
   registers,
   logins,
   joins,
-  posts,
+  posts - reposts, // Subtract reposts from total posts
+  reposts,
   comments,
   votes,
   dms,
@@ -100,26 +103,58 @@ fn string_slice(s: String, start: Int, len: Int) -> String
 pub fn report_metrics(metrics: List(Metric)) {
   let detailed = analyze_metrics(metrics)
 
-  io.println("\n╔════════════════════════════════════════════════════════════╗")
+  io.println("\n╔══════════════════════════════════════════════════════════╗")
   io.println("║           REDDIT SIMULATOR PERFORMANCE REPORT              ║")
-  io.println("╚════════════════════════════════════════════════════════════╝")
+  io.println("╚══════════════════════════════════════════════════════════╝")
   io.println("")
-  io.println("┌─ Timing Statistics ─────────────────────────────────────┐")
+  io.println("┌─ Timing Statistics ──────────────────────────────────────┐")
   io.println("│ Total simulation time: " <> pad_right(int.to_string(detailed.total_time_ms) <> " ms", 31) <> "│")
   io.println("│ Operations per second: " <> pad_right(float.to_string(detailed.ops_per_second), 31) <> "│")
   io.println("└──────────────────────────────────────────────────────────┘")
   io.println("")
-  io.println("┌─ Operation Breakdown ───────────────────────────────────┐")
+  io.println("┌─ Operation Breakdown ────────────────────────────────────┐")
   io.println("│ Total operations:      " <> pad_right(int.to_string(detailed.total_operations), 31) <> "│")
   io.println("│ • User registrations:  " <> pad_right(int.to_string(detailed.registers), 31) <> "│")
   io.println("│ • User logins:         " <> pad_right(int.to_string(detailed.logins), 31) <> "│")
   io.println("│ • Subreddit joins:     " <> pad_right(int.to_string(detailed.joins), 31) <> "│")
   io.println("│ • Posts created:       " <> pad_right(int.to_string(detailed.posts), 31) <> "│")
+  io.println("│ • Re-posts created:    " <> pad_right(int.to_string(detailed.reposts), 31) <> "│")
   io.println("│ • Comments created:    " <> pad_right(int.to_string(detailed.comments), 31) <> "│")
   io.println("│ • Votes cast:          " <> pad_right(int.to_string(detailed.votes), 31) <> "│")
   io.println("│ • Direct messages:     " <> pad_right(int.to_string(detailed.dms), 31) <> "│")
   io.println("└──────────────────────────────────────────────────────────┘")
   io.println("")
+
+  // Calculate and display content distribution
+  print_content_distribution(detailed)
+}
+
+fn print_content_distribution(metrics: DetailedMetrics) {
+  io.println("┌─ Content Distribution ───────────────────────────────────┐")
+
+  let total_content = metrics.posts + metrics.reposts + metrics.comments
+
+  case total_content > 0 {
+    True -> {
+      let post_pct = int.to_float(metrics.posts) /. int.to_float(total_content) *. 100.0
+      let repost_pct = int.to_float(metrics.reposts) /. int.to_float(total_content) *. 100.0
+      let comment_pct = int.to_float(metrics.comments) /. int.to_float(total_content) *. 100.0
+
+      io.println("│ Original posts:        " <> pad_right(float_to_string_2dp(post_pct) <> "%", 31) <> "│")
+      io.println("│ Re-posts:              " <> pad_right(float_to_string_2dp(repost_pct) <> "%", 31) <> "│")
+      io.println("│ Comments:              " <> pad_right(float_to_string_2dp(comment_pct) <> "%", 31) <> "│")
+    }
+    False -> {
+      io.println("│ No content created yet                                    │")
+    }
+  }
+
+  io.println("└──────────────────────────────────────────────────────────┘")
+}
+
+fn float_to_string_2dp(f: Float) -> String {
+  let rounded = float.round(f *. 100.0) / 100
+  int.to_string(rounded)
 }
 
 fn pad_right(s: String, width: Int) -> String {

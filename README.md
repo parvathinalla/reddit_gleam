@@ -4,7 +4,8 @@
 This project implements a Reddit-like social platform with full functionality including user registration, subreddit management, posting, commenting, voting, karma system, and direct messaging. The implementation uses Gleam for the core engine and includes advanced simulation features.
 
 ## Team Members
-[Add your team member names here]
+Bindhu Sree Reddy Alla (UFID: 54455430)
+Parvati Nalla
 
 ## Features Implemented
 
