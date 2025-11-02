@@ -50,3 +50,14 @@ fn sample_zipf_rec(i: Int, acc: Float, max: Int, norm: Float, u: Float, s: Int) 
 pub fn sample_zipf(s: Int, max: Int) -> Int {
   sample_zipf_seed(s, max, 1)
 }
+
+// Calculate the probability mass function for a given rank in Zipf distribution
+pub fn zipf_probability(rank: Int, s: Int, max: Int) -> Float {
+  let norm = harmonic_norm(max, s)
+  pow_inverse_float(rank, s) /. norm
+}
+
+// Get the expected frequency for a rank (normalized to 0-1 range)
+pub fn zipf_frequency(rank: Int, s: Int, max: Int) -> Float {
+  zipf_probability(rank, s, max)
+}

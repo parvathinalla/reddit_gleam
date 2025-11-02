@@ -1,10 +1,10 @@
 pub type User {
   User(
-    name: String,
-    karma: Int,
-    inbox: List(DirectMessage),
-    subreddits: List(String),
-    password: String,
+  name: String,
+  karma: Int,
+  inbox: List(DirectMessage),
+  subreddits: List(String),
+  password: String,
   )
 }
 
@@ -14,25 +14,25 @@ pub type Subreddit {
 
 pub type Post {
   Post(
-    id: Int,
-    author: String,
-    subreddit: String,
-    title: String,
-    body: String,
-    score: Int,
-    comments: List(Comment),
-    timestamp: Int,
+  id: Int,
+  author: String,
+  subreddit: String,
+  title: String,
+  body: String,
+  score: Int,
+  comments: List(Comment),
+  timestamp: Int,
   )
 }
 
 pub type Comment {
   Comment(
-    id: Int,
-    author: String,
-    body: String,
-    score: Int,
-    replies: List(Comment),
-    timestamp: Int,
+  id: Int,
+  author: String,
+  body: String,
+  score: Int,
+  replies: List(Comment),
+  timestamp: Int,
   )
 }
 
@@ -59,10 +59,10 @@ pub type EngineMsg {
   GetPost(post_id: Int) // fetch a single post + comments
   // Commenting: parent_comment_id = 0 indicates root comment
   CreateComment(
-    author: String,
-    post_id: Int,
-    parent_comment_id: Int,
-    body: String,
+  author: String,
+  post_id: Int,
+  parent_comment_id: Int,
+  body: String,
   )
   SendDirectMessage(from: String, to: String, body: String)
   GetDirectMessages(user: String)

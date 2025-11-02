@@ -7,29 +7,29 @@ import reddit_metrics
 
 pub type VoteEntry {
   VoteEntry(
-    post_id: Int,
-    voter: String,
-    value: Int
+  post_id: Int,
+  voter: String,
+  value: Int
   )
 }
 
 pub type EngineState {
   EngineState(
-    users: List(UserEntry),
-    subreddits: List(SubredditEntry),
-    votes: List(VoteEntry),
-    global_posts: List(reddit_types.Post),
-    post_id_counter: Int,
-    comment_id_counter: Int,
-    operations: Int
+  users: List(UserEntry),
+  subreddits: List(SubredditEntry),
+  votes: List(VoteEntry),
+  global_posts: List(reddit_types.Post),
+  post_id_counter: Int,
+  comment_id_counter: Int,
+  operations: Int
   )
 }
 
 // Engine function result: new state plus a structured reply.
 pub type EngineResult {
   EngineResult(
-    EngineState,
-    reddit_types.EngineReply
+  EngineState,
+  reddit_types.EngineReply
   )
 }
 
@@ -62,21 +62,21 @@ pub type PagAcc {
 
 pub type UserEntry {
   UserEntry(
-    name: String,
-    user: reddit_types.User
+  name: String,
+  user: reddit_types.User
   )
 }
 
 pub type SubredditEntry {
   SubredditEntry(
-    name: String,
-    subreddit: reddit_types.Subreddit
+  name: String,
+  subreddit: reddit_types.Subreddit
   )
 }
 
 pub fn start() {
   engine_loop(
-    EngineState(list.new(), list.new(), list.new(), list.new(), 0, 0, 0)
+  EngineState(list.new(), list.new(), list.new(), list.new(), 0, 0, 0)
   )
 }
 
@@ -151,7 +151,7 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
       // If subreddit doesn't exist, return error
       let found = list.any(state.subreddits, fn(e) { case e { SubredditEntry(n, _) -> n == subreddit } })
       case found {
-  False -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("subreddit_not_found"))
+        False -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("subreddit_not_found"))
         True -> {
           // Check membership
           let member = list.any(state.subreddits, fn(e) { case e { SubredditEntry(n, s) -> n == subreddit && list.any(s.members, fn(m) { m == user }) } })
@@ -204,11 +204,11 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
     // Register/Login handlers (simple inline implementations)
     reddit_types.Register(name, password) -> {
       let _ = reddit_metrics.log_event("Register: " <> name)
-  // validate name: non-empty, no spaces, reasonable length
-  let has_space = string.contains(name, " ")
-  let invalid = name == "" || has_space || string.length(name) > 64
+      // validate name: non-empty, no spaces, reasonable length
+      let has_space = string.contains(name, " ")
+      let invalid = name == "" || has_space || string.length(name) > 64
       case invalid {
-  True -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("invalid_name"))
+        True -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("invalid_name"))
         False -> {
           let exists = list.any(state.users, fn(e) { case e { UserEntry(n, _) -> n == name } })
           case exists {
@@ -228,14 +228,12 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
       let _ = reddit_metrics.log_event("Login: " <> name)
       let maybe = find_user(state.users, name)
       case maybe {
-  UserNotFound -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("login_failed"))
-  UserFound(u) -> case u { reddit_types.User(_n, _karma, _inbox, _subs, pw) -> case pw == password { True -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Ok) False -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("login_failed")) } }
+        UserNotFound -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("login_failed"))
+        UserFound(u) -> case u { reddit_types.User(_n, _karma, _inbox, _subs, pw) -> case pw == password { True -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Ok) False -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("login_failed")) } }
       }
     }
 
     // Read APIs
-    // (legacy single-arg GetFeed removed; use GetFeed(user, page, page_size))
-
     reddit_types.GetSubFeed(subreddit_name) -> {
       let _ = reddit_metrics.log_event("GetSubFeed: " <> subreddit_name)
       // Filter the global_posts for the requested subreddit and return newest-first
@@ -260,7 +258,10 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
           let allowed = u.subreddits
           let posts_all = state.global_posts
           // Use an empty-list check instead of list.length for efficiency
-          let posts = case allowed == [] { True -> posts_all False -> list.filter(state.global_posts, fn(p) { case p { reddit_types.Post(_id, _author, sub_name, _t, _b, _s, _c, _ts) -> list.any(allowed, fn(a) { a == sub_name }) } }) }
+          let posts = case allowed {
+            [] -> posts_all
+            _ -> list.filter(state.global_posts, fn(p) { case p { reddit_types.Post(_id, _author, sub_name, _t, _b, _s, _c, _ts) -> list.any(allowed, fn(a) { a == sub_name }) } })
+          }
           let total = list.length(posts)
           let page_safe = case page <= 0 { True -> 1 False -> page }
           let page_size_safe = case page_size <= 0 { True -> 10 False -> page_size }
@@ -277,7 +278,7 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
     reddit_types.GetPost(post_id) -> {
       let _ = reddit_metrics.log_event("GetPost: " <> int.to_string(post_id))
       let maybe_post = find_post(state.subreddits, post_id)
-  let new_state = EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
+      let new_state = EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
       case maybe_post {
         Found(p) -> EngineResult(new_state, reddit_types.PostData(p))
         NotFound -> EngineResult(new_state, reddit_types.Error("post_not_found"))
@@ -288,7 +289,7 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
       let _ = reddit_metrics.log_event("CreateComment by " <> author <> " on post " <> int.to_string(post_id))
       // Create the comment and attempt to insert it into the matching post's comments
       let new_comment_id = state.comment_id_counter + 1
-  let new_comment = reddit_types.Comment(new_comment_id, author, body, 0, list.new(), new_ops)
+      let new_comment = reddit_types.Comment(new_comment_id, author, body, 0, list.new(), new_ops)
 
       // Walk subreddits & posts to insert the comment
       let result = list.fold(state.subreddits, SubredditInsertAcc(list.new(), False), fn(acc, entry) {
@@ -301,32 +302,32 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
                 case pacc {
                   PostInsertAcc(acc_posts, True) -> PostInsertAcc(list.append(acc_posts, [p]), True)
                   PostInsertAcc(acc_posts, False) -> case p { reddit_types.Post(id, author_p, subreddit_name_p, title_p, body_p, score_p, comments_p, ts_p) ->
-                    case id == post_id {
-                      True -> {
-                        // Found the post: insert as top-level or nested comment
-                        case parent_id == 0 {
-                          True -> {
-                            let new_comments = list.append(comments_p, [new_comment])
-                            let new_post = reddit_types.Post(id, author_p, subreddit_name_p, title_p, body_p, score_p, new_comments, ts_p)
-                            PostInsertAcc(list.append(acc_posts, [new_post]), True)
-                          }
-                          False -> {
-                            let nested = insert_into_comments(comments_p, parent_id, new_comment)
-                                                  case nested {
-                                                    InsertResult(new_comments, True) -> {
-                                                      let new_post = reddit_types.Post(id, author_p, subreddit_name_p, title_p, body_p, score_p, new_comments, ts_p)
-                                                      PostInsertAcc(list.append(acc_posts, [new_post]), True)
-                                                    }
-                                                    InsertResult(_, False) -> {
-                                                      // parent not found in this post
-                                                      PostInsertAcc(list.append(acc_posts, [p]), False)
-                                                    }
-                                                  }
+                  case id == post_id {
+                    True -> {
+                      // Found the post: insert as top-level or nested comment
+                      case parent_id == 0 {
+                        True -> {
+                          let new_comments = list.append(comments_p, [new_comment])
+                          let new_post = reddit_types.Post(id, author_p, subreddit_name_p, title_p, body_p, score_p, new_comments, ts_p)
+                          PostInsertAcc(list.append(acc_posts, [new_post]), True)
+                        }
+                        False -> {
+                          let nested = insert_into_comments(comments_p, parent_id, new_comment)
+                          case nested {
+                            InsertResult(new_comments, True) -> {
+                              let new_post = reddit_types.Post(id, author_p, subreddit_name_p, title_p, body_p, score_p, new_comments, ts_p)
+                              PostInsertAcc(list.append(acc_posts, [new_post]), True)
+                            }
+                            InsertResult(_, False) -> {
+                              // parent not found in this post
+                              PostInsertAcc(list.append(acc_posts, [p]), False)
+                            }
                           }
                         }
                       }
-                      False -> PostInsertAcc(list.append(acc_posts, [p]), False)
                     }
+                    False -> PostInsertAcc(list.append(acc_posts, [p]), False)
+                  }
                   }
                 }
               })
@@ -356,15 +357,15 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
           let updated_global = case maybe_updated {
             Found(p) -> case p {
               reddit_types.Post(id_p, _, _, _, _, _, _, _) ->
-                list.map(state.global_posts, fn(gp) {
-                  case gp {
-                    reddit_types.Post(id_g, _, _, _, _, _, _, _) ->
-                      case id_g == id_p {
-                        True -> p
-                        False -> gp
-                      }
+              list.map(state.global_posts, fn(gp) {
+                case gp {
+                  reddit_types.Post(id_g, _, _, _, _, _, _, _) ->
+                  case id_g == id_p {
+                    True -> p
+                    False -> gp
                   }
-                })
+                }
+              })
             }
             NotFound -> state.global_posts
           }
@@ -377,6 +378,7 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
         }
       }
     }
+
     reddit_types.SendDirectMessage(from, to, body) -> {
       let _ = reddit_metrics.log_event("SendDirectMessage from " <> from <> " to " <> to)
       // Find recipient and add message to their inbox
@@ -415,7 +417,7 @@ fn insert_sorted(sorted_acc, p) {
   case sorted_acc {
     [] -> [p]
     [h, ..t] -> case h { reddit_types.Post(_, _, _, _, _, _, _, ts_h) -> case p { reddit_types.Post(_, _, _, _, _, _, _, ts_p) ->
-      case ts_p >= ts_h { True -> list.append([p], sorted_acc) False -> list.append([h], insert_sorted(t, p)) }
+    case ts_p >= ts_h { True -> list.append([p], sorted_acc) False -> list.append([h], insert_sorted(t, p)) }
     }
     }
   }
@@ -439,10 +441,10 @@ fn find_post(subs: List(SubredditEntry), post_id: Int) -> MaybePost {
               case acc2 {
                 Found(_) -> acc2
                 NotFound -> case p { reddit_types.Post(id, _, _, _, _, _, _, _) ->
-                  case id == post_id {
-                    True -> Found(p)
-                    False -> NotFound
-                  }
+                case id == post_id {
+                  True -> Found(p)
+                  False -> NotFound
+                }
                 }
               }
             })
@@ -491,7 +493,7 @@ fn insert_into_comments(comments: List(reddit_types.Comment), parent_id: Int, ne
           case id == parent_id {
             True -> {
               let new_replies = list.append(replies_c, [new_comment])
-                InsertResult(list.append(acc_list, [reddit_types.Comment(id, author_c, body_c, score_c, new_replies, ts_c)]), True)
+              InsertResult(list.append(acc_list, [reddit_types.Comment(id, author_c, body_c, score_c, new_replies, ts_c)]), True)
             }
             False -> {
               // Try to insert into nested replies
@@ -507,27 +509,22 @@ fn insert_into_comments(comments: List(reddit_types.Comment), parent_id: Int, ne
     }
   })
 }
-// (old stub removed) Comment insertion implemented in `CreateComment` handler using `insert_into_comments`.
 
 // Add a user (idempotent: will add duplicate entries if user already exists).
 fn add_user(state: EngineState, name: String, new_ops: Int) -> EngineState {
   // Do not add duplicate users
   let exists = list.any(state.users, fn(e) { case e { UserEntry(n, _) -> n == name } })
   case exists {
-  True -> EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
+    True -> EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
     False -> {
       // legacy add_user: default empty password
       let user = reddit_types.User(name, 0, list.new(), list.new(), "")
       let entry = UserEntry(name, user)
       let users = list.append(state.users, [entry])
-  EngineState(users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
+      EngineState(users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
     }
   }
 }
-
-
-
-// legacy join_sub helper removed; JoinSub is handled inline in `handle_message` now.
 
 fn leave_sub(state: EngineState, user: String, subreddit_name: String, new_ops: Int) -> EngineState {
   let updated = list.map(state.subreddits, fn(entry) {
@@ -544,12 +541,19 @@ fn leave_sub(state: EngineState, user: String, subreddit_name: String, new_ops: 
     }
   })
 
-  // Remove any subreddit entries that now have zero members.
-  let final_subs = list.filter(updated, fn(entry) { case entry { SubredditEntry(_, subreddit) -> subreddit.members == [] } })
+  // FIXED: Keep only NON-EMPTY subreddits (previously kept empty ones - bug!)
+  let final_subs = list.filter(updated, fn(entry) {
+    case entry {
+      SubredditEntry(_, subreddit) -> subreddit.members != []  // Changed from == to !=
+    }
+  })
 
   // Determine which subreddits were removed (members went to zero)
   let removed = list.fold(updated, list.new(), fn(acc, entry) {
-    case entry { SubredditEntry(n, subreddit) -> case subreddit.members == [] { True -> list.append(acc, [n]) False -> acc } }
+    case entry { SubredditEntry(n, subreddit) -> case subreddit.members {
+      [] -> list.append(acc, [n])
+      _ -> acc
+    } }
   })
 
   // Filter out posts that belonged to removed subreddits from global_posts
@@ -570,28 +574,28 @@ fn create_post(state: EngineState, author: String, subreddit_name: String, title
   let updated_subreddits = list.map(state.subreddits, fn(entry) {
     case entry {
       SubredditEntry(name, subreddit) -> {
-          case name == subreddit_name {
-            True -> {
-              let posts = list.append(subreddit.posts, [post])
-              SubredditEntry(name, reddit_types.Subreddit(name, subreddit.members, posts))
-            }
-            False -> entry
+        case name == subreddit_name {
+          True -> {
+            let posts = list.append(subreddit.posts, [post])
+            SubredditEntry(name, reddit_types.Subreddit(name, subreddit.members, posts))
           }
+          False -> entry
         }
+      }
     }
   })
 
   // If the subreddit didn't exist, add it.
   let exists = list.any(updated_subreddits, fn(e) { case e { SubredditEntry(n, _) -> n == subreddit_name } })
   let final_subreddits =
-    case exists {
-      True -> updated_subreddits
-      False -> {
-          // When creating a subreddit due to a post, make the author a member.
-          let new_sub = SubredditEntry(subreddit_name, reddit_types.Subreddit(subreddit_name, [author], [post]))
-          list.append(updated_subreddits, [new_sub])
-        }
+  case exists {
+    True -> updated_subreddits
+    False -> {
+      // When creating a subreddit due to a post, make the author a member.
+      let new_sub = SubredditEntry(subreddit_name, reddit_types.Subreddit(subreddit_name, [author], [post]))
+      list.append(updated_subreddits, [new_sub])
     }
+  }
 
   // Also append the post to the global_posts list so feeds can use it directly.
   let new_global_posts = list.append(state.global_posts, [post])
@@ -615,17 +619,17 @@ fn vote_post(state: EngineState, voter: String, post_id: Int, delta: Int, new_op
   let new_subs = list.map(state.subreddits, fn(entry) {
     case entry {
       SubredditEntry(name, subreddit) -> {
-          let new_posts = list.map(subreddit.posts, fn(p) {
-            case p {
-              reddit_types.Post(id, author, subreddit_name, title, body, score, comments, ts_p) ->
-                case id == post_id {
-                  True -> reddit_types.Post(id, author, subreddit_name, title, body, score + change, comments, ts_p)
-                  False -> p
-                }
+        let new_posts = list.map(subreddit.posts, fn(p) {
+          case p {
+            reddit_types.Post(id, author, subreddit_name, title, body, score, comments, ts_p) ->
+            case id == post_id {
+              True -> reddit_types.Post(id, author, subreddit_name, title, body, score + change, comments, ts_p)
+              False -> p
             }
-          })
-          SubredditEntry(name, reddit_types.Subreddit(name, subreddit.members, new_posts))
-        }
+          }
+        })
+        SubredditEntry(name, reddit_types.Subreddit(name, subreddit.members, new_posts))
+      }
     }
   })
 
@@ -633,10 +637,10 @@ fn vote_post(state: EngineState, voter: String, post_id: Int, delta: Int, new_op
   let maybe_post = find_post(new_subs, post_id)
   let new_users = case maybe_post {
     Found(p) -> case p { reddit_types.Post(_id, author_name, _, _, _, _score, _comments, _ts) ->
-        list.map(state.users, fn(e) {
-          case e { UserEntry(n, u) -> case n == author_name { True -> UserEntry(n, reddit_types.User(u.name, u.karma + change, u.inbox, u.subreddits, u.password)) False -> e } }
-        })
-      }
+    list.map(state.users, fn(e) {
+      case e { UserEntry(n, u) -> case n == author_name { True -> UserEntry(n, reddit_types.User(u.name, u.karma + change, u.inbox, u.subreddits, u.password)) False -> e } }
+    })
+    }
     NotFound -> state.users
   }
 
@@ -647,17 +651,15 @@ fn vote_post(state: EngineState, voter: String, post_id: Int, delta: Int, new_op
     False -> list.append(state.votes, [VoteEntry(post_id, voter, new_value)])
   }
 
-  // Debugging prints removed
-
   // Also update the global_posts list to reflect the changed post score if present.
   let updated_global = case maybe_post {
     Found(p) -> case p { reddit_types.Post(id_p, _author_p, _sub_p, _t, _b, _s, _c, _ts) ->
-      // map and replace matching post id
-      list.map(state.global_posts, fn(gp) {
-        case gp { reddit_types.Post(id_g, author_g, sub_g, title_g, body_g, score_g, comments_g, ts_g) ->
-          case id_g == id_p { True -> reddit_types.Post(id_g, author_g, sub_g, title_g, body_g, score_g + change, comments_g, ts_g) False -> gp }
-        }
-      })
+    // map and replace matching post id
+    list.map(state.global_posts, fn(gp) {
+      case gp { reddit_types.Post(id_g, author_g, sub_g, title_g, body_g, score_g, comments_g, ts_g) ->
+      case id_g == id_p { True -> reddit_types.Post(id_g, author_g, sub_g, title_g, body_g, score_g + change, comments_g, ts_g) False -> gp }
+      }
+    })
     }
     NotFound -> state.global_posts
   }
