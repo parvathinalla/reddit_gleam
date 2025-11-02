@@ -191,7 +191,7 @@ pub fn run_simulator_with_distribution(user_count: Int, sub_count: Int, zipf_s: 
 
   // Phase 4: Simulate re-posts (FULLY IMPLEMENTED)
   io.println("\nPhase 4: Simulating re-posts from popular content...")
-  let final = simulate_reposts(phase3, subs)
+  let final = simulate_reposts(phase3)
 
   // Final statistics
   case final { SimAcc(state_final, _, metrics, users) -> {
@@ -304,7 +304,7 @@ fn reconnect_all_users(users: List(SimulatorUser)) -> List(SimulatorUser) {
 // Simulate activity from online users only
 fn simulate_online_activity(acc: SimAcc) -> SimAcc {
   case acc {
-    SimAcc(state, _last_post_id, metrics, users) -> {
+    SimAcc(_state, _last_post_id, _metrics, users) -> {
       let unwrap = fn(res, metrics_arg, event) {
         let timestamp = now_ms()
         let new_metrics = list.append(metrics_arg, [reddit_metrics.Metric(event, timestamp)])
@@ -360,7 +360,7 @@ fn simulate_online_activity(acc: SimAcc) -> SimAcc {
 }
 
 // FULLY IMPLEMENTED: Simulate re-posts from popular content
-fn simulate_reposts(acc: SimAcc, subs: List(String)) -> SimAcc {
+fn simulate_reposts(acc: SimAcc) -> SimAcc {
   case acc {
     SimAcc(state, last_post_id, metrics, users) -> {
       io.println("  Finding top posts to re-post...")
@@ -384,11 +384,11 @@ fn simulate_reposts(acc: SimAcc, subs: List(String)) -> SimAcc {
       // Each reposter picks a random top post and re-posts it to their subreddit
       let result = list.fold(reposters, #(state, last_post_id, metrics), fn(acc_inner, user) {
         case acc_inner {
-          #(inner_state, last_id, m) -> {
+          #(inner_state, _last_id, m) -> {
             case user {
               SimulatorUser(name, _, _, _, subreddit) -> {
                 // Pick a post to repost (use deterministic selection)
-                let post_to_repost = pick_post_for_repost(top_posts, name, subreddit)
+                let post_to_repost = pick_post_for_repost(top_posts, subreddit)
 
                 case post_to_repost {
                   reddit_types.Post(_, orig_author, orig_sub, orig_title, orig_body, _, _, _) -> {
@@ -480,7 +480,6 @@ fn insert_sorted_by_score(sorted_acc: List(reddit_types.Post), p: reddit_types.P
 // Pick a post for reposting (deterministic selection to avoid duplicates)
 fn pick_post_for_repost(
 posts: List(reddit_types.Post),
-user_name: String,
 user_subreddit: String
 ) -> reddit_types.Post {
   // Filter out posts from the user's own subreddit (don't repost to same sub)
