@@ -2,20 +2,26 @@ import gleam/int
 import gleam/list
 
 // Integer-power Zipf sampler (deterministic, seeded).
-// s: integer exponent (>= 0). Uses inverse-transform sampling with floats but
-// computes powers using integer multiplication to avoid missing float pow helpers.
+// FIXED VERSION: Better random distribution
 
 fn int_pow(base: Int, exp: Int) -> Int {
-  case exp <= 0 { True -> 1 False -> list.fold(list.range(1, exp), 1, fn(acc, _) { acc * base }) }
+  case exp <= 0 {
+    True -> 1
+    False -> base * int_pow(base, exp - 1)
+  }
 }
 
+// Improved LCG with better mixing to avoid all users getting rank 1
 fn lcg_uniform(seed: Int) -> Float {
-  // Constants from Numerical Recipes
-  let a = 1664525
-  let c = 1013904223
-  let m = 4294967296 // 2^32
-  let next = {a * seed + c} % m
-  int.to_float(next) /. int.to_float(m)
+  // Use a combination of transformations for better distribution
+  let seed1 = { seed * 48271 } % 2147483647
+  let seed2 = { seed * 69621 + 12345 } % 2147483647
+  let mixed = { seed1 + seed2 } % 2147483647
+
+  // Additional mixing to spread values
+  let final_seed = { mixed * 1103515245 + 12345 } % 2147483647
+
+  int.to_float(final_seed) /. 2147483647.0
 }
 
 fn pow_inverse_float(k: Int, s: Int) -> Float {
@@ -28,8 +34,13 @@ fn harmonic_norm(n: Int, s: Int) -> Float {
 }
 
 pub fn sample_zipf_seed(s: Int, max: Int, seed: Int) -> Int {
+  // Critical fix: Use seed directly without modification to ensure variety
   let norm = harmonic_norm(max, s)
   let u = lcg_uniform(seed)
+
+  // Add debug trace for first few seeds
+  // io.debug(#("seed", seed, "u", u, "max", max))
+
   sample_zipf_rec(1, 0.0, max, norm, u, s)
 }
 

@@ -5,7 +5,7 @@ This project implements a Reddit-like social platform with full functionality in
 
 ## Team Members
 Bindhu Sree Reddy Alla (UFID: 54455430)
-Parvati Nalla
+Parvati Nalla (UFID: 80911450)
 
 ## Features Implemented
 
