@@ -1,24 +1,25 @@
 -module(reddit_persistence).
--compile([export_all]).
-
-%% Simple ETS-backed persistence for engine state.
-%% Stores a single key 'engine_state' containing the Erlang term for the engine state.
+-export([start/0, save_state/1, load_state/0, clear/0]).
 
 -define(TABLE, reddit_engine_persist).
 
+%% Initialize ETS table for state persistence
 start() ->
-    %% Create the ETS table if it doesn't already exist.
     case ets:info(?TABLE) of
         undefined ->
-            ets:new(?TABLE, [named_table, public, set]);
-        _ -> ok
+            ets:new(?TABLE, [named_table, public, set]),
+            ok;
+        _ ->
+            ok
     end.
 
+%% Save engine state to ETS
 save_state(State) ->
     start(),
     ets:insert(?TABLE, {engine_state, State}),
     ok.
 
+%% Load engine state from ETS
 load_state() ->
     start(),
     case ets:lookup(?TABLE, engine_state) of
@@ -26,6 +27,7 @@ load_state() ->
         [] -> {error, not_found}
     end.
 
+%% Clear all persisted data
 clear() ->
     start(),
     ets:delete_all_objects(?TABLE),

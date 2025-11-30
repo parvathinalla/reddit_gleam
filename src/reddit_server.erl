@@ -1,92 +1,94 @@
- -module(reddit_server).
+-module(reddit_server).
+-export([start/0, stop/0, spawn_engine/0]).
 
-%% Avoid global export_all; export only public functions below.
-
-%% Server that hosts the Gleam engine (calls into compiled reddit_engine module)
-%% and simple Erlang clients to demonstrate sync request/response.
-
- -export([start/0, spawn_engine/0, spawn_clients/1, start_and_spawn/1]).
-
+%% Start the Reddit engine server
 start() ->
-    Pid = spawn_link(fun spawn_engine/0),
-    register(reddit_engine_server, Pid),
-    io:format("Started reddit_engine_server ~p~n", [Pid]),
-    ok.
-
-spawn_engine() ->
-    %% Initialize persistence and attempt to load saved state.
-    %% If none exists, use a fresh initial state.
-    reddit_persistence:start(),
-    State0 = case reddit_persistence:load_state() of
-        {ok, S} -> S;
-        {error, _} -> {engine_state, gleam@list:new(), gleam@list:new(), gleam@list:new(), 0, 0, 0}
-    end,
-    engine_loop(State0).
-
-engine_loop(State) ->
-    receive
-            {From, Ref, Msg} ->
-                %% Msg expected to be an Erlang tuple matching reddit_engine:handle_message
-                try
-                    Result = reddit_engine:handle_message(State, Msg),
-                    case Result of
-                        {NewState, Reply} ->
-                            %% Forward the structured reply from the Gleam layer directly
-                            From ! {Ref, Reply},
-                            engine_loop(NewState);
-                        _ ->
-                            %% Unexpected reply shape
-                            From ! {Ref, {error, unexpected_engine_reply}},
-                            engine_loop(State)
-                    end
-                catch
-                    Class:Reason ->
-                        From ! {Ref, {error, {Class, Reason}}},
-                        engine_loop(State)
-                end;
-        stop ->
-            io:format("Engine stopping - saving state~n"),
-            %% Save the last known state before exiting. We assume the state is in the
-            %% loop's current binding; for graceful stop we expect the caller to send
-            %% stop after any state changes have been processed.
-            reddit_persistence:save_state(State),
-            ok;
-        _Other ->
-            %% ignore unknown messages
-            engine_loop(State)
+    case whereis(reddit_engine_server) of
+        undefined ->
+            io:format("Initializing Reddit engine...~n"),
+            Pid = spawn_link(fun spawn_engine/0),
+            register(reddit_engine_server, Pid),
+            io:format("Started reddit_engine_server ~p~n", [Pid]),
+            {ok, Pid};
+        Pid ->
+            io:format("Engine already running: ~p~n", [Pid]),
+            {ok, Pid}
     end.
 
-%% Spawn N simple clients that perform synchronous Register -> Join -> CreatePost flows
-spawn_clients(N) when is_integer(N), N > 0 ->
-    spawn_clients(1, N).
+%% Stop the engine server
+stop() ->
+    case whereis(reddit_engine_server) of
+        undefined ->
+            ok;
+        Pid ->
+            Pid ! stop,
+            timer:sleep(100),
+            ok
+    end.
 
-spawn_clients(I, N) when I =< N ->
-    Name = lists:concat(["user_", integer_to_list(I)]),
-    spawn_link(fun() -> client_process(Name) end),
-    spawn_clients(I + 1, N);
-spawn_clients(_, _) -> ok.
+%% Spawn the engine loop
+spawn_engine() ->
+    % Try to load saved state, otherwise use initial state
+    State0 = case reddit_persistence:load_state() of
+                 {ok, SavedState} ->
+                     io:format("Loaded saved state~n"),
+                     SavedState;
+                 {error, _} ->
+                     io:format("Using initial state~n"),
+                     {engine_state, [], [], [], [], 0, 0, 0}
+             end,
+    engine_loop(State0).
 
-client_process(Name) ->
-    Engine = whereis(reddit_engine_server),
-    NameBin = list_to_binary(Name),
-    Ref1 = make_ref(),
-    Engine ! {self(), Ref1, {join, NameBin}},
+%% Main engine loop - receives messages and calls Gleam engine
+engine_loop(State) ->
     receive
-        {Ref1, ok} -> ok
-    after 5000 -> io:format("~s: register timeout~n", [Name])
-    end,
+        {From, Ref, Msg} ->
+            try
+                % Call Gleam's handle_message function
+                Result = reddit_engine:handle_message(State, Msg),
 
-    Ref2 = make_ref(),
-    Engine ! {self(), Ref2, {create_post, NameBin, list_to_binary("general"), list_to_binary("Hello"), list_to_binary("Hi everyone")}},
-    receive
-        {Ref2, ok} -> ok
-    after 5000 -> io:format("~s: create_post timeout~n", [Name])
-    end,
+                case Result of
+                    % Gleam returns {engine_result, NewState, Reply}
+                    {engine_result, NewState, Reply} ->
+                        From ! {Ref, Reply},
+                        engine_loop(NewState);
 
-    io:format("Client ~s done\n", [Name]).
+                    % Fallback: sometimes just {NewState, Reply}
+                    {NewState, Reply} when is_tuple(NewState) ->
+                        From ! {Ref, Reply},
+                        engine_loop(NewState);
 
-%% Convenience: start the engine and spawn N clients (useful for quick runs)
-start_and_spawn(N) when is_integer(N), N > 0 ->
-    start(),
-    spawn_clients(N),
-    ok.
+                    Other ->
+                        io:format("Unexpected engine result: ~p~n", [Other]),
+                        From ! {Ref, {error, "unexpected_engine_reply"}},
+                        engine_loop(State)
+                end
+            catch
+                error:undef:Stack ->
+                    io:format("Engine function not found!~n"),
+                    io:format("Stack: ~p~n", [Stack]),
+                    io:format("Available functions: ~p~n", [reddit_engine:module_info(exports)]),
+                    From ! {Ref, {error, "engine_function_not_found"}},
+                    engine_loop(State);
+
+                Class:Reason:Stack ->
+                    io:format("Engine error: ~p:~p~n", [Class, Reason]),
+                    io:format("Stack trace: ~p~n", [Stack]),
+                    From ! {Ref, {error, "engine_crash"}},
+                    engine_loop(State)
+            end;
+
+        stop ->
+            io:format("Engine stopping - saving state...~n"),
+            reddit_persistence:save_state(State),
+            io:format("Engine stopped~n"),
+            ok;
+
+        {debug, From} ->
+            From ! {state, State},
+            engine_loop(State);
+
+        Other ->
+            io:format("Engine received unknown message: ~p~n", [Other]),
+            engine_loop(State)
+    end.
