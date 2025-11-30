@@ -160,7 +160,8 @@ route_request("POST", "/api/login", Body) ->
   handle_login(Body);
 
 route_request("POST", "/api/subreddits/" ++ Rest, Body) ->
-  case string:split(Rest, "/", all) of
+  % Split from the right to handle subreddit names with slashes like "r/coding"
+  case string:split(Rest, "/", trailing) of
     [Name, "join"] -> handle_join_subreddit(Name, Body);
     [Name, "leave"] -> handle_leave_subreddit(Name, Body);
     _ -> {404, "{\"error\":\"not_found\"}"}
@@ -473,9 +474,11 @@ handle_get_feed(Body) ->
       reddit_engine_server ! {self(), Ref, Msg},
 
       receive
-        {Ref, {posts_page, _Posts, Page, _PageSize, Total}} ->
+        {Ref, {posts_page, Posts, Page, _PageSize, Total}} ->
           io:format("  ✓ Feed for ~s: ~p posts~n", [binary_to_list(Username), Total]),
-          {200, "{\"posts\":[],\"page\":" ++ integer_to_list(Page) ++ ",\"total\":" ++ integer_to_list(Total) ++ "}"};
+          % Convert posts to JSON
+          PostsJson = serialize_posts(Posts),
+          {200, "{\"posts\":" ++ PostsJson ++ ",\"page\":" ++ integer_to_list(Page) ++ ",\"total\":" ++ integer_to_list(Total) ++ "}"};
         {Ref, {error, Msg}} ->
           MsgStr = ensure_string(Msg),
           {400, "{\"error\":\"" ++ MsgStr ++ "\"}"}
@@ -607,3 +610,54 @@ parse_json(Body) when is_list(Body) ->
   end;
 parse_json(_) ->
   {error, invalid_input}.
+
+%% Serialize posts to JSON
+serialize_posts(Posts) ->
+  case Posts of
+    [] -> "[]";
+    _ -> "[" ++ string:join(lists:map(fun serialize_post/1, Posts), ",") ++ "]"
+  end.
+
+serialize_post(Post) ->
+  % Post is a Gleam tuple: {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp}
+  case Post of
+    {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp} ->
+      AuthorStr = ensure_string(Author),
+      SubredditStr = ensure_string(Subreddit),
+      TitleStr = escape_json_string(ensure_string(Title)),
+      BodyStr = escape_json_string(ensure_string(Body)),
+      CommentsCount = length_of_list(Comments),
+      "{\"id\":" ++ integer_to_list(Id) ++
+        ",\"author\":\"" ++ AuthorStr ++ "\"" ++
+        ",\"subreddit\":\"" ++ SubredditStr ++ "\"" ++
+        ",\"title\":\"" ++ TitleStr ++ "\"" ++
+        ",\"body\":\"" ++ BodyStr ++ "\"" ++
+        ",\"score\":" ++ integer_to_list(Score) ++
+        ",\"comments\":" ++ integer_to_list(CommentsCount) ++
+        ",\"timestamp\":" ++ integer_to_list(Timestamp) ++ "}";
+    _ ->
+      "{\"error\":\"invalid_post_format\"}"
+  end.
+
+%% Escape special characters in JSON strings
+escape_json_string(Str) ->
+  escape_json_string(Str, []).
+
+escape_json_string([], Acc) ->
+  lists:reverse(Acc);
+escape_json_string([H | T], Acc) ->
+  case H of
+    $" -> escape_json_string(T, [$", $\\ | Acc]);
+    $\\ -> escape_json_string(T, [$\\, $\\ | Acc]);
+    $\n -> escape_json_string(T, [$n, $\\ | Acc]);
+    $\r -> escape_json_string(T, [$r, $\\ | Acc]);
+    $\t -> escape_json_string(T, [$t, $\\ | Acc]);
+    _ -> escape_json_string(T, [H | Acc])
+  end.
+
+%% Count list length (for comments)
+length_of_list(List) ->
+  length_of_list(List, 0).
+
+length_of_list([], Count) -> Count;
+length_of_list([_ | Rest], Count) -> length_of_list(Rest, Count + 1).
