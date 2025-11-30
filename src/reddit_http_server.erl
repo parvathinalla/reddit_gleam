@@ -52,9 +52,9 @@ print_endpoints() ->
   io:format("  GET    /api/posts/:id        - Get post by ID~n"),
   io:format("  POST   /api/posts/:id/vote   - Vote on post~n"),
   io:format("  POST   /api/posts/:id/comments - Add comment~n"),
-  io:format("  GET    /api/feed             - Get user feed~n"),
+  io:format("  POST   /api/feed             - Get user feed~n"),
   io:format("  POST   /api/messages/send    - Send direct message~n"),
-  io:format("  GET    /api/messages         - Get user messages~n").
+  io:format("  POST   /api/messages         - Get user messages~n").
 
 stop() ->
   case whereis(reddit_http_server) of
@@ -140,8 +140,8 @@ handle_http_request(#{method := Method, path := Path, headers := _Headers, body 
   {StatusCode, ResponseBody} = try
                                  route_request(Method, Path, Body)
                                catch
-                                 _:Error ->
-                                   io:format("  ✗ Error: ~p~n", [Error]),
+                                 _:Error:Stack ->
+                                   io:format("  ✗ Error: ~p~n  Stack: ~p~n", [Error, Stack]),
                                    {500, "{\"error\":\"internal_error\"}"}
                                end,
 
@@ -179,10 +179,10 @@ route_request("POST", "/api/posts/" ++ Rest, Body) ->
     _ -> {404, "{\"error\":\"not_found\"}"}
   end;
 
-route_request("GET", "/api/feed", Body) ->
+route_request("POST", "/api/feed", Body) ->
   handle_get_feed(Body);
 
-route_request("GET", "/api/messages", Body) ->
+route_request("POST", "/api/messages", Body) ->
   handle_get_messages(Body);
 
 route_request("POST", "/api/messages/send", Body) ->
@@ -191,23 +191,78 @@ route_request("POST", "/api/messages/send", Body) ->
 route_request(_Method, _Path, _Body) ->
   {404, "{\"error\":\"not_found\"}"}.
 
+%% ============= GLEAM MESSAGE CONSTRUCTORS =============
+%% These functions create proper Gleam variant types
+
+make_register_msg(Username, Password) ->
+  % Creates: Register(name: String, password: String)
+  {register, Username, Password}.
+
+make_login_msg(Username, Password) ->
+  % Creates: Login(name: String, password: String)
+  {login, Username, Password}.
+
+make_join_sub_msg(User, Subreddit) ->
+  % Creates: JoinSub(user: String, subreddit: String)
+  {join_sub, User, Subreddit}.
+
+make_leave_sub_msg(User, Subreddit) ->
+  % Creates: LeaveSub(user: String, subreddit: String)
+  {leave_sub, User, Subreddit}.
+
+make_create_post_msg(Author, Subreddit, Title, Body) ->
+  % Creates: CreatePost(author, subreddit, title, body)
+  {create_post, Author, Subreddit, Title, Body}.
+
+make_vote_msg(Voter, PostId, Delta) ->
+  % Creates: Vote(voter, post_id, delta)
+  {vote, Voter, PostId, Delta}.
+
+make_create_comment_msg(Author, PostId, ParentId, Body) ->
+  % Creates: CreateComment(author, post_id, parent_comment_id, body)
+  {create_comment, Author, PostId, ParentId, Body}.
+
+make_get_feed_msg(User, Page, PageSize) ->
+  % Creates: GetFeed(user, page, page_size)
+  {get_feed, User, Page, PageSize}.
+
+make_get_post_msg(PostId) ->
+  % Creates: GetPost(post_id)
+  {get_post, PostId}.
+
+make_send_dm_msg(From, To, Body) ->
+  % Creates: SendDirectMessage(from, to, body)
+  {send_direct_message, From, To, Body}.
+
+make_get_dms_msg(User) ->
+  % Creates: GetDirectMessages(user)
+  {get_direct_messages, User}.
+
 %% ============= REQUEST HANDLERS =============
+
 handle_register(Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      Username = proplists:get_value("username", Json, "unknown"),
-      Password = proplists:get_value("password", Json, "password"),
+      Username = get_json_value("username", Json, <<"unknown">>),
+      Password = get_json_value("password", Json, <<"password">>),
+
+      % Convert to binaries (Gleam strings)
+      UsernameBin = ensure_binary(Username),
+      PasswordBin = ensure_binary(Password),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {register, Username, Password, ""}},  % Added "" for public_key
+      Msg = make_register_msg(UsernameBin, PasswordBin),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
-          io:format("  ✓ Registered: ~s~n", [Username]),
-          {201, "{\"status\":\"success\",\"username\":\"" ++ Username ++ "\"}"};
+          UserStr = binary_to_list(UsernameBin),
+          io:format("  ✓ Registered: ~s~n", [UserStr]),
+          {201, "{\"status\":\"success\",\"username\":\"" ++ UserStr ++ "\"}"};
         {Ref, {error, Msg}} ->
-          io:format("  ✗ Registration failed: ~s~n", [Msg]),
-          {400, "{\"status\":\"error\",\"message\":\"" ++ Msg ++ "\"}"}
+          MsgStr = ensure_string(Msg),
+          io:format("  ✗ Registration failed: ~s~n", [MsgStr]),
+          {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -218,19 +273,21 @@ handle_register(Body) ->
 handle_login(Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      Username = proplists:get_value("username", Json, "unknown"),
-      Password = proplists:get_value("password", Json, "password"),
+      Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
+      Password = ensure_binary(get_json_value("password", Json, <<"password">>)),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {login, Username, Password}},
+      Msg = make_login_msg(Username, Password),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
-          Token = generate_token(Username),
-          io:format("  ✓ Logged in: ~s~n", [Username]),
-          {200, "{\"status\":\"success\",\"token\":\"" ++ Token ++ "\",\"username\":\"" ++ Username ++ "\"}"};
+          UserStr = binary_to_list(Username),
+          Token = generate_token(UserStr),
+          io:format("  ✓ Logged in: ~s~n", [UserStr]),
+          {200, "{\"status\":\"success\",\"token\":\"" ++ Token ++ "\",\"username\":\"" ++ UserStr ++ "\"}"};
         {Ref, {error, _}} ->
-          io:format("  ✗ Login failed for: ~s~n", [Username]),
+          io:format("  ✗ Login failed for: ~s~n", [binary_to_list(Username)]),
           {401, "{\"status\":\"error\",\"message\":\"Invalid credentials\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
@@ -242,17 +299,20 @@ handle_login(Body) ->
 handle_join_subreddit(Name, Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      Username = proplists:get_value("username", Json, "unknown"),
+      Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
+      SubredditBin = list_to_binary(Name),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {join_sub, Username, Name}},
+      Msg = make_join_sub_msg(Username, SubredditBin),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
-          io:format("  ✓ ~s joined ~s~n", [Username, Name]),
+          io:format("  ✓ ~s joined ~s~n", [binary_to_list(Username), Name]),
           {200, "{\"status\":\"success\",\"message\":\"Joined " ++ Name ++ "\"}"};
         {Ref, {error, Msg}} ->
-          {400, "{\"status\":\"error\",\"message\":\"" ++ Msg ++ "\"}"}
+          MsgStr = ensure_string(Msg),
+          {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -263,17 +323,20 @@ handle_join_subreddit(Name, Body) ->
 handle_leave_subreddit(Name, Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      Username = proplists:get_value("username", Json, "unknown"),
+      Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
+      SubredditBin = list_to_binary(Name),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {leave_sub, Username, Name}},
+      Msg = make_leave_sub_msg(Username, SubredditBin),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
-          io:format("  ✓ ~s left ~s~n", [Username, Name]),
+          io:format("  ✓ ~s left ~s~n", [binary_to_list(Username), Name]),
           {200, "{\"status\":\"success\",\"message\":\"Left " ++ Name ++ "\"}"};
         {Ref, {error, Msg}} ->
-          {400, "{\"status\":\"error\",\"message\":\"" ++ Msg ++ "\"}"}
+          MsgStr = ensure_string(Msg),
+          {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -284,20 +347,25 @@ handle_leave_subreddit(Name, Body) ->
 handle_create_post(Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      Username = proplists:get_value("username", Json, "unknown"),
-      Subreddit = proplists:get_value("subreddit", Json, "general"),
-      Title = proplists:get_value("title", Json, "Untitled"),
-      PostBody = proplists:get_value("body", Json, ""),
+      Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
+      Subreddit = ensure_binary(get_json_value("subreddit", Json, <<"general">>)),
+      Title = ensure_binary(get_json_value("title", Json, <<"Untitled">>)),
+      PostBody = ensure_binary(get_json_value("body", Json, <<"">>)),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {create_post, Username, Subreddit, Title, PostBody}},
+      Msg = make_create_post_msg(Username, Subreddit, Title, PostBody),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
-          io:format("  ✓ Post created by ~s in ~s~n", [Username, Subreddit]),
-          {201, "{\"status\":\"success\",\"message\":\"Post created in " ++ Subreddit ++ "\"}"};
+          io:format("  ✓ Post created by ~s in ~s~n", [binary_to_list(Username), binary_to_list(Subreddit)]),
+          {201, "{\"status\":\"success\",\"message\":\"Post created\"}"};
+        {Ref, {ok_with_id, PostId}} ->
+          io:format("  ✓ Post #~p created by ~s in ~s~n", [PostId, binary_to_list(Username), binary_to_list(Subreddit)]),
+          {201, "{\"status\":\"success\",\"post_id\":" ++ integer_to_list(PostId) ++ "}"};
         {Ref, {error, Msg}} ->
-          {400, "{\"status\":\"error\",\"message\":\"" ++ Msg ++ "\"}"}
+          MsgStr = ensure_string(Msg),
+          {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -309,13 +377,15 @@ handle_get_post(IdStr) ->
   case catch list_to_integer(IdStr) of
     Id when is_integer(Id) ->
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {get_post, Id}},
+      Msg = make_get_post_msg(Id),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, {post_data, _Post}} ->
           {200, "{\"post\":{\"id\":" ++ integer_to_list(Id) ++ ",\"message\":\"Post found\"}}"};
         {Ref, {error, Msg}} ->
-          {404, "{\"error\":\"" ++ Msg ++ "\"}"}
+          MsgStr = ensure_string(Msg),
+          {404, "{\"error\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -328,22 +398,24 @@ handle_vote_post(IdStr, Body) ->
     Id when is_integer(Id) ->
       case parse_json(Body) of
         {ok, Json} ->
-          Username = proplists:get_value("username", Json, "unknown"),
-          DeltaStr = proplists:get_value("delta", Json, "0"),
-          Delta = case catch list_to_integer(DeltaStr) of
+          Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
+          DeltaVal = get_json_value("delta", Json, <<"0">>),
+          Delta = case catch list_to_integer(ensure_string(DeltaVal)) of
                     D when is_integer(D) -> D;
                     _ -> 0
                   end,
 
           Ref = make_ref(),
-          reddit_engine_server ! {self(), Ref, {vote, Username, Id, Delta}},
+          Msg = make_vote_msg(Username, Id, Delta),
+          reddit_engine_server ! {self(), Ref, Msg},
 
           receive
             {Ref, ok} ->
               io:format("  ✓ Vote recorded on post #~p~n", [Id]),
               {200, "{\"status\":\"success\",\"message\":\"Vote recorded\"}"};
             {Ref, {error, Msg}} ->
-              {400, "{\"status\":\"error\",\"message\":\"" ++ Msg ++ "\"}"}
+              MsgStr = ensure_string(Msg),
+              {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
           after 5000 ->
             {500, "{\"error\":\"timeout\"}"}
           end;
@@ -359,23 +431,28 @@ handle_create_comment(IdStr, Body) ->
     PostId when is_integer(PostId) ->
       case parse_json(Body) of
         {ok, Json} ->
-          Username = proplists:get_value("username", Json, "unknown"),
-          CommentBody = proplists:get_value("body", Json, ""),
-          ParentIdStr = proplists:get_value("parent_id", Json, "0"),
-          ParentId = case catch list_to_integer(ParentIdStr) of
+          Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
+          CommentBody = ensure_binary(get_json_value("body", Json, <<"">>)),
+          ParentIdVal = get_json_value("parent_id", Json, <<"0">>),
+          ParentId = case catch list_to_integer(ensure_string(ParentIdVal)) of
                        P when is_integer(P) -> P;
                        _ -> 0
                      end,
 
           Ref = make_ref(),
-          reddit_engine_server ! {self(), Ref, {create_comment, Username, PostId, ParentId, CommentBody}},
+          Msg = make_create_comment_msg(Username, PostId, ParentId, CommentBody),
+          reddit_engine_server ! {self(), Ref, Msg},
 
           receive
             {Ref, ok} ->
               io:format("  ✓ Comment added to post #~p~n", [PostId]),
               {201, "{\"status\":\"success\",\"message\":\"Comment added\"}"};
+            {Ref, {ok_with_id, CommentId}} ->
+              io:format("  ✓ Comment #~p added to post #~p~n", [CommentId, PostId]),
+              {201, "{\"status\":\"success\",\"comment_id\":" ++ integer_to_list(CommentId) ++ "}"};
             {Ref, {error, Msg}} ->
-              {400, "{\"status\":\"error\",\"message\":\"" ++ Msg ++ "\"}"}
+              MsgStr = ensure_string(Msg),
+              {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
           after 5000 ->
             {500, "{\"error\":\"timeout\"}"}
           end;
@@ -389,17 +466,19 @@ handle_create_comment(IdStr, Body) ->
 handle_get_feed(Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      Username = proplists:get_value("username", Json, "unknown"),
+      Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {get_feed, Username, 1, 10}},
+      Msg = make_get_feed_msg(Username, 1, 10),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, {posts_page, _Posts, Page, _PageSize, Total}} ->
-          io:format("  ✓ Feed for ~s: ~p posts~n", [Username, Total]),
-          {200, "{\"posts\":[],\"page\":" ++ integer_to_list(Page) ++ ",\"total\":" ++ integer_to_list(Total) ++ ",\"message\":\"Feed retrieved\"}"};
-        _ ->
-          {500, "{\"error\":\"unexpected_response\"}"}
+          io:format("  ✓ Feed for ~s: ~p posts~n", [binary_to_list(Username), Total]),
+          {200, "{\"posts\":[],\"page\":" ++ integer_to_list(Page) ++ ",\"total\":" ++ integer_to_list(Total) ++ "}"};
+        {Ref, {error, Msg}} ->
+          MsgStr = ensure_string(Msg),
+          {400, "{\"error\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -410,17 +489,19 @@ handle_get_feed(Body) ->
 handle_get_messages(Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      Username = proplists:get_value("username", Json, "unknown"),
+      Username = ensure_binary(get_json_value("username", Json, <<"unknown">>)),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {get_direct_messages, Username}},
+      Msg = make_get_dms_msg(Username),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, {direct_messages, _Messages}} ->
-          io:format("  ✓ Messages retrieved for ~s~n", [Username]),
-          {200, "{\"messages\":[],\"message\":\"Messages retrieved\"}"};
-        _ ->
-          {500, "{\"error\":\"unexpected_response\"}"}
+          io:format("  ✓ Messages retrieved for ~s~n", [binary_to_list(Username)]),
+          {200, "{\"messages\":[]}"};
+        {Ref, {error, Msg}} ->
+          MsgStr = ensure_string(Msg),
+          {400, "{\"error\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -431,19 +512,21 @@ handle_get_messages(Body) ->
 handle_send_message(Body) ->
   case parse_json(Body) of
     {ok, Json} ->
-      FromUser = proplists:get_value("from", Json, "unknown"),
-      ToUser = proplists:get_value("to", Json, "unknown"),
-      MessageBody = proplists:get_value("body", Json, ""),
+      FromUser = ensure_binary(get_json_value("from", Json, <<"unknown">>)),
+      ToUser = ensure_binary(get_json_value("to", Json, <<"unknown">>)),
+      MessageBody = ensure_binary(get_json_value("body", Json, <<"">>)),
 
       Ref = make_ref(),
-      reddit_engine_server ! {self(), Ref, {send_direct_message, FromUser, ToUser, MessageBody}},
+      Msg = make_send_dm_msg(FromUser, ToUser, MessageBody),
+      reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
-          io:format("  ✓ Message sent from ~s to ~s~n", [FromUser, ToUser]),
+          io:format("  ✓ Message sent from ~s to ~s~n", [binary_to_list(FromUser), binary_to_list(ToUser)]),
           {201, "{\"status\":\"success\",\"message\":\"Message sent\"}"};
         {Ref, {error, Msg}} ->
-          {400, "{\"status\":\"error\",\"message\":\"" ++ Msg ++ "\"}"}
+          MsgStr = ensure_string(Msg),
+          {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
       end;
@@ -482,6 +565,20 @@ generate_token(Username) ->
   Timestamp = erlang:system_time(millisecond),
   Data = Username ++ ":" ++ integer_to_list(Timestamp),
   base64:encode_to_string(crypto:hash(sha256, Data)).
+
+get_json_value(Key, Json, Default) ->
+  case proplists:get_value(Key, Json) of
+    undefined -> Default;
+    Value -> Value
+  end.
+
+ensure_binary(Data) when is_binary(Data) -> Data;
+ensure_binary(Data) when is_list(Data) -> list_to_binary(Data);
+ensure_binary(Data) -> list_to_binary(lists:flatten(io_lib:format("~p", [Data]))).
+
+ensure_string(Data) when is_binary(Data) -> binary_to_list(Data);
+ensure_string(Data) when is_list(Data) -> Data;
+ensure_string(Data) -> lists:flatten(io_lib:format("~p", [Data])).
 
 parse_json(Body) when is_binary(Body) ->
   parse_json(binary_to_list(Body));

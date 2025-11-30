@@ -1,6 +1,5 @@
 import gleam/io
 import gleam/list
-import gleam/string
 import gleam/int
 import reddit_types
 import reddit_metrics
@@ -76,7 +75,7 @@ pub type SubredditEntry {
 
 pub fn start() {
   engine_loop(
-  EngineState(list.new(), list.new(), list.new(), list.new(), 0, 0, 0)
+  EngineState([], [], [], [], 0, 0, 0)
   )
 }
 
@@ -101,7 +100,7 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
       case exists {
         False -> {
           // create subreddit with user as first member
-          let new_sub = SubredditEntry(subreddit, reddit_types.Subreddit(subreddit, [user], list.new()))
+          let new_sub = SubredditEntry(subreddit, reddit_types.Subreddit(subreddit, [user], []))
           let final = list.append(state1.subreddits, [new_sub])
           // Also record subreddit in the user's data (idempotent)
           let updated_users = list.map(state1.users, fn(e) {
@@ -187,7 +186,7 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
         }
         False -> {
           // create subreddit and add author as first member, then create post
-          let new_sub = SubredditEntry(subreddit, reddit_types.Subreddit(subreddit, [author], list.new()))
+          let new_sub = SubredditEntry(subreddit, reddit_types.Subreddit(subreddit, [author], []))
           let state1 = EngineState(state.users, list.append(state.subreddits, [new_sub]), state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
           let new_state = create_post(state1, author, subreddit, title, body, new_ops)
           case new_state { EngineState(_, _, _, _, post_id_counter, _, _) -> EngineResult(new_state, reddit_types.OkWithId(post_id_counter)) }
@@ -204,20 +203,34 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
     // Register/Login handlers (simple inline implementations)
     reddit_types.Register(name, password) -> {
       let _ = reddit_metrics.log_event("Register: " <> name)
-      // validate name: non-empty, no spaces, reasonable length
-      let has_space = string.contains(name, " ")
-      let invalid = name == "" || has_space || string.length(name) > 64
-      case invalid {
-        True -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("invalid_name"))
+
+      // Check if user already exists - FIXED VERSION
+      let user_exists_result = check_if_user_exists(state.users, name)
+
+      case user_exists_result {
+        True -> {
+          EngineResult(
+          EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops),
+          reddit_types.Error("user_exists")
+          )
+        }
         False -> {
-          let exists = list.any(state.users, fn(e) { case e { UserEntry(n, _) -> n == name } })
-          case exists {
-            True -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("user_exists"))
-            False -> {
-              let user = reddit_types.User(name, 0, list.new(), list.new(), password)
+          // Validate name
+          case name {
+            "" -> {
+              EngineResult(
+              EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops),
+              reddit_types.Error("invalid_name")
+              )
+            }
+            _ -> {
+              let user = reddit_types.User(name, 0, [], [], password)
               let entry = UserEntry(name, user)
               let users = list.append(state.users, [entry])
-              EngineResult(EngineState(users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Ok)
+              EngineResult(
+              EngineState(users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops),
+              reddit_types.Ok
+              )
             }
           }
         }
@@ -225,11 +238,39 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
     }
 
     reddit_types.Login(name, password) -> {
-      let _ = reddit_metrics.log_event("Login: " <> name)
+      let _ = reddit_metrics.log_event("Login: " <> name <> " with password")
       let maybe = find_user(state.users, name)
       case maybe {
-        UserNotFound -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("login_failed"))
-        UserFound(u) -> case u { reddit_types.User(_n, _karma, _inbox, _subs, pw) -> case pw == password { True -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Ok) False -> EngineResult(EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops), reddit_types.Error("login_failed")) } }
+        UserNotFound -> {
+          let _ = reddit_metrics.log_event("Login: User not found: " <> name)
+          EngineResult(
+          EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops),
+          reddit_types.Error("login_failed")
+          )
+        }
+        UserFound(u) -> {
+          case u {
+            reddit_types.User(_n, _karma, _inbox, _subs, pw) -> {
+              let _ = reddit_metrics.log_event("Login: Comparing passwords")
+              case pw == password {
+                True -> {
+                  let _ = reddit_metrics.log_event("Login: Password match!")
+                  EngineResult(
+                  EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops),
+                  reddit_types.Ok
+                  )
+                }
+                False -> {
+                  let _ = reddit_metrics.log_event("Login: Password mismatch!")
+                  EngineResult(
+                  EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops),
+                  reddit_types.Error("login_failed")
+                  )
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -289,16 +330,16 @@ pub fn handle_message(state: EngineState, msg: reddit_types.EngineMsg) -> Engine
       let _ = reddit_metrics.log_event("CreateComment by " <> author <> " on post " <> int.to_string(post_id))
       // Create the comment and attempt to insert it into the matching post's comments
       let new_comment_id = state.comment_id_counter + 1
-      let new_comment = reddit_types.Comment(new_comment_id, author, body, 0, list.new(), new_ops)
+      let new_comment = reddit_types.Comment(new_comment_id, author, body, 0, [], new_ops)
 
       // Walk subreddits & posts to insert the comment
-      let result = list.fold(state.subreddits, SubredditInsertAcc(list.new(), False), fn(acc, entry) {
+      let result = list.fold(state.subreddits, SubredditInsertAcc([], False), fn(acc, entry) {
         case acc {
           SubredditInsertAcc(acc_subs, True) -> SubredditInsertAcc(list.append(acc_subs, [entry]), True)
           SubredditInsertAcc(acc_subs, False) -> case entry {
             SubredditEntry(name, subreddit) -> {
               // process posts for this subreddit
-              let post_acc = list.fold(subreddit.posts, PostInsertAcc(list.new(), False), fn(pacc, p) {
+              let post_acc = list.fold(subreddit.posts, PostInsertAcc([], False), fn(pacc, p) {
                 case pacc {
                   PostInsertAcc(acc_posts, True) -> PostInsertAcc(list.append(acc_posts, [p]), True)
                   PostInsertAcc(acc_posts, False) -> case p { reddit_types.Post(id, author_p, subreddit_name_p, title_p, body_p, score_p, comments_p, ts_p) ->
@@ -424,7 +465,7 @@ fn insert_sorted(sorted_acc, p) {
 }
 
 fn sort_posts_by_ts_desc(posts: List(reddit_types.Post)) -> List(reddit_types.Post) {
-  list.fold(posts, list.new(), fn(acc, p) { insert_sorted(acc, p) })
+  list.fold(posts, [], fn(acc, p) { insert_sorted(acc, p) })
 }
 
 // Find a post by id
@@ -458,18 +499,25 @@ fn find_post(subs: List(SubredditEntry), post_id: Int) -> MaybePost {
 
 // Find a user by name
 fn find_user(users: List(UserEntry), name: String) -> MaybeUser {
-  list.fold(users, UserNotFound, fn(acc, e) {
-    case acc {
-      UserFound(_) -> acc
-      UserNotFound -> case e { UserEntry(n, u) -> case n == name { True -> UserFound(u) False -> UserNotFound } }
+  case users {
+    [] -> UserNotFound
+    [first, ..rest] -> {
+      case first {
+        UserEntry(username, user) -> {
+          case username == name {
+            True -> UserFound(user)
+            False -> find_user(rest, name)
+          }
+        }
+      }
     }
-  })
+  }
 }
 
 // Pagination helper implemented by folding with an index counter to avoid list destructuring quirks
 fn paginate(xs: List(reddit_types.Post), skip: Int, count: Int) -> List(reddit_types.Post) {
   let end = skip + count
-  let acc = list.fold(xs, PagAcc(list.new(), 0), fn(acc, x) {
+  let acc = list.fold(xs, PagAcc([], 0), fn(acc, x) {
     case acc {
       PagAcc(acc_list, idx) -> {
         case idx >= skip && idx < end {
@@ -485,7 +533,7 @@ fn paginate(xs: List(reddit_types.Post), skip: Int, count: Int) -> List(reddit_t
 // Insert into nested comments. Returns (new_comments, inserted_flag)
 fn insert_into_comments(comments: List(reddit_types.Comment), parent_id: Int, new_comment: reddit_types.Comment) -> InsertResult {
   // Fold over comments building new list and short-circuit insertion flag
-  list.fold(comments, InsertResult(list.new(), False), fn(acc, c) {
+  list.fold(comments, InsertResult([], False), fn(acc, c) {
     case acc {
       InsertResult(acc_list, True) -> InsertResult(list.append(acc_list, [c]), True)
       InsertResult(acc_list, False) -> case c {
@@ -518,7 +566,7 @@ fn add_user(state: EngineState, name: String, new_ops: Int) -> EngineState {
     True -> EngineState(state.users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
     False -> {
       // legacy add_user: default empty password
-      let user = reddit_types.User(name, 0, list.new(), list.new(), "")
+      let user = reddit_types.User(name, 0, [], [], "")
       let entry = UserEntry(name, user)
       let users = list.append(state.users, [entry])
       EngineState(users, state.subreddits, state.votes, state.global_posts, state.post_id_counter, state.comment_id_counter, new_ops)
@@ -549,7 +597,7 @@ fn leave_sub(state: EngineState, user: String, subreddit_name: String, new_ops: 
   })
 
   // Determine which subreddits were removed (members went to zero)
-  let removed = list.fold(updated, list.new(), fn(acc, entry) {
+  let removed = list.fold(updated, [], fn(acc, entry) {
     case entry { SubredditEntry(n, subreddit) -> case subreddit.members {
       [] -> list.append(acc, [n])
       _ -> acc
@@ -568,7 +616,7 @@ fn leave_sub(state: EngineState, user: String, subreddit_name: String, new_ops: 
 
 fn create_post(state: EngineState, author: String, subreddit_name: String, title: String, body: String, new_ops: Int) -> EngineState {
   let new_id = state.post_id_counter + 1
-  let post = reddit_types.Post(new_id, author, subreddit_name, title, body, 0, list.new(), new_ops)
+  let post = reddit_types.Post(new_id, author, subreddit_name, title, body, 0, [], new_ops)
 
   // Try to update existing subreddit posts, otherwise create the subreddit.
   let updated_subreddits = list.map(state.subreddits, fn(entry) {
@@ -671,6 +719,23 @@ fn vote_post(state: EngineState, voter: String, post_id: Int, delta: Int, new_op
 fn engine_loop(state: EngineState) {
   let _ = io.println("Engine running... operations=" <> int.to_string(state.operations))
   engine_loop(state)
+}
+
+// Simple recursive check for user existence - avoids list.any issues
+fn check_if_user_exists(users: List(UserEntry), target_name: String) -> Bool {
+  case users {
+    [] -> False
+    [first, ..rest] -> {
+      case first {
+        UserEntry(username, _) -> {
+          case username == target_name {
+            True -> True
+            False -> check_if_user_exists(rest, target_name)
+          }
+        }
+      }
+    }
+  }
 }
 
 // Diagnostic helper: list subreddits with member and post counts
