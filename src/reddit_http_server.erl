@@ -382,10 +382,14 @@ handle_get_post(IdStr) ->
       reddit_engine_server ! {self(), Ref, Msg},
 
       receive
-        {Ref, {post_data, _Post}} ->
-          {200, "{\"post\":{\"id\":" ++ integer_to_list(Id) ++ ",\"message\":\"Post found\"}}"};
+        {Ref, {post_data, Post}} ->
+          io:format("  ✓ Post #~p retrieved~n", [Id]),
+          % Serialize the actual post data
+          PostJson = serialize_post(Post),
+          {200, "{\"post\":" ++ PostJson ++ "}"};
         {Ref, {error, Msg}} ->
           MsgStr = ensure_string(Msg),
+          io:format("  ✗ Post not found: ~p~n", [Id]),
           {404, "{\"error\":\"" ++ MsgStr ++ "\"}"}
       after 5000 ->
         {500, "{\"error\":\"timeout\"}"}
@@ -619,24 +623,47 @@ serialize_posts(Posts) ->
   end.
 
 serialize_post(Post) ->
-  % Post is a Gleam tuple: {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp}
   case Post of
     {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp} ->
       AuthorStr = ensure_string(Author),
       SubredditStr = ensure_string(Subreddit),
       TitleStr = escape_json_string(ensure_string(Title)),
       BodyStr = escape_json_string(ensure_string(Body)),
-      CommentsCount = length_of_list(Comments),
+      CommentsJson = serialize_comments(Comments),
       "{\"id\":" ++ integer_to_list(Id) ++
         ",\"author\":\"" ++ AuthorStr ++ "\"" ++
         ",\"subreddit\":\"" ++ SubredditStr ++ "\"" ++
         ",\"title\":\"" ++ TitleStr ++ "\"" ++
         ",\"body\":\"" ++ BodyStr ++ "\"" ++
         ",\"score\":" ++ integer_to_list(Score) ++
-        ",\"comments\":" ++ integer_to_list(CommentsCount) ++
+        ",\"comments\":" ++ CommentsJson ++
         ",\"timestamp\":" ++ integer_to_list(Timestamp) ++ "}";
     _ ->
       "{\"error\":\"invalid_post_format\"}"
+  end.
+
+%% Serialize comments array
+serialize_comments(Comments) ->
+  case Comments of
+    [] -> "[]";
+    _ -> "[" ++ string:join(lists:map(fun serialize_comment/1, Comments), ",") ++ "]"
+  end.
+
+%% Serialize a single comment
+serialize_comment(Comment) ->
+  case Comment of
+    {comment, Id, Author, Body, Score, Replies, Timestamp} ->
+      AuthorStr = ensure_string(Author),
+      BodyStr = escape_json_string(ensure_string(Body)),
+      RepliesJson = serialize_comments(Replies),
+      "{\"id\":" ++ integer_to_list(Id) ++
+        ",\"author\":\"" ++ AuthorStr ++ "\"" ++
+        ",\"body\":\"" ++ BodyStr ++ "\"" ++
+        ",\"score\":" ++ integer_to_list(Score) ++
+        ",\"replies\":" ++ RepliesJson ++
+        ",\"timestamp\":" ++ integer_to_list(Timestamp) ++ "}";
+    _ ->
+      "{\"error\":\"invalid_comment_format\"}"
   end.
 
 %% Escape special characters in JSON strings
