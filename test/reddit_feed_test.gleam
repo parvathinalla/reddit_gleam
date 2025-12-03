@@ -13,7 +13,7 @@ fn unwrap_state(res: reddit_engine.EngineResult) -> reddit_engine.EngineState {
 // Collect post ids from a posts list
 fn post_ids(posts: List(reddit_types.Post)) -> List(Int) {
   list.fold(posts, list.new(), fn(acc, p) {
-    case p { reddit_types.Post(id, _, _, _, _, _, _, _) -> list.append(acc, [id]) }
+    case p { reddit_types.Post(id, _, _, _, _, _, _, _, _) -> list.append(acc, [id]) }
   })
 }
 
@@ -25,11 +25,11 @@ pub fn feed_pagination_and_ordering_test() {
   let s2 = unwrap_state(reddit_engine.handle_message(s1, reddit_types.Join("bob")))
 
   // alice posts first
-  let s3 = unwrap_state(reddit_engine.handle_message(s2, reddit_types.CreatePost("alice", "r/a", "t1", "b1")))
+  let s3 = unwrap_state(reddit_engine.handle_message(s2, reddit_types.CreatePost("alice", "r/a", "t1", "b1", signature: "")))
   // bob posts second
-  let s4 = unwrap_state(reddit_engine.handle_message(s3, reddit_types.CreatePost("bob", "r/b", "t2", "b2")))
+  let s4 = unwrap_state(reddit_engine.handle_message(s3, reddit_types.CreatePost("bob", "r/b", "t2", "b2", "")))
   // alice posts third (newest)
-  let s5 = unwrap_state(reddit_engine.handle_message(s4, reddit_types.CreatePost("alice", "r/a", "t3", "b3")))
+  let s5 = unwrap_state(reddit_engine.handle_message(s4, reddit_types.CreatePost("alice", "r/a", "t3", "b3", "")))
 
   // Page 1 size 2 should return newest two posts (3,2)
   case reddit_engine.handle_message(s5, reddit_types.GetFeed("alice", 1, 2)) {
@@ -62,8 +62,8 @@ pub fn feed_subscription_filtering_test() {
   let s2 = unwrap_state(reddit_engine.handle_message(s1, reddit_types.Join("bob")))
 
   // bob posts in two different subreddits
-  let s3 = unwrap_state(reddit_engine.handle_message(s2, reddit_types.CreatePost("bob", "r/a", "tA", "bA")))
-  let s4 = unwrap_state(reddit_engine.handle_message(s3, reddit_types.CreatePost("bob", "r/b", "tB", "bB")))
+  let s3 = unwrap_state(reddit_engine.handle_message(s2, reddit_types.CreatePost("bob", "r/a", "tA", "bA", "")))
+  let s4 = unwrap_state(reddit_engine.handle_message(s3, reddit_types.CreatePost("bob", "r/b", "tB", "bB", "")))
 
   // alice subscribes only to r/a
   let s5 = unwrap_state(reddit_engine.handle_message(s4, reddit_types.JoinSub("alice", "r/a")))
@@ -88,7 +88,7 @@ pub fn feed_defaults_test() {
 
   let s1 = unwrap_state(reddit_engine.handle_message(state0, reddit_types.Join("u")))
   // create a single post
-  let s2 = unwrap_state(reddit_engine.handle_message(s1, reddit_types.CreatePost("u", "r/x", "t", "b")))
+  let s2 = unwrap_state(reddit_engine.handle_message(s1, reddit_types.CreatePost("u", "r/x", "t", "b", "")))
 
   case reddit_engine.handle_message(s2, reddit_types.GetFeed("u", 0, 0)) {
     reddit_engine.EngineResult(_s3, reddit_types.PostsPage(_posts, page, page_size, total)) -> {

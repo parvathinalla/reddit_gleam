@@ -116,12 +116,17 @@ engine_loop(State) ->
             engine_loop(State)
     end.
 
+%% ============================================================================
 %% Convert Erlang message tuples to Gleam variant format
-%% Gleam variants are represented as tagged tuples in Erlang
+%% ============================================================================
+
+convert_to_gleam_msg({register, Username, Password, PublicKey}) ->
+    % Gleam: Register(name: String, password: String, public_key: String)
+    {register, ensure_binary(Username), ensure_binary(Password), ensure_binary(PublicKey)};
+
 convert_to_gleam_msg({register, Username, Password}) ->
-    % Gleam: Register(name: String, password: String)
-    % In Erlang FFI, this is represented as: {register, Username, Password}
-    {register, ensure_binary(Username), ensure_binary(Password)};
+    % Fallback for old format - add empty public key
+    {register, ensure_binary(Username), ensure_binary(Password), <<"">>};
 
 convert_to_gleam_msg({login, Username, Password}) ->
     % Gleam: Login(name: String, password: String)
@@ -135,13 +140,23 @@ convert_to_gleam_msg({leave_sub, User, Subreddit}) ->
     % Gleam: LeaveSub(user: String, subreddit: String)
     {leave_sub, ensure_binary(User), ensure_binary(Subreddit)};
 
-convert_to_gleam_msg({create_post, Author, Subreddit, Title, Body}) ->
-    % Gleam: CreatePost(author, subreddit, title, body)
+convert_to_gleam_msg({create_post, Author, Subreddit, Title, Body, Signature}) ->
+    % Gleam: CreatePost(author, subreddit, title, body, signature)
     {create_post,
         ensure_binary(Author),
         ensure_binary(Subreddit),
         ensure_binary(Title),
-        ensure_binary(Body)};
+        ensure_binary(Body),
+        ensure_binary(Signature)};
+
+convert_to_gleam_msg({create_post, Author, Subreddit, Title, Body}) ->
+    % Fallback for old format without signature
+    {create_post,
+        ensure_binary(Author),
+        ensure_binary(Subreddit),
+        ensure_binary(Title),
+        ensure_binary(Body),
+        <<"unsigned">>};
 
 convert_to_gleam_msg({vote, Voter, PostId, Delta}) ->
     % Gleam: Vote(voter, post_id, delta)
@@ -171,11 +186,18 @@ convert_to_gleam_msg({get_direct_messages, User}) ->
     % Gleam: GetDirectMessages(user)
     {get_direct_messages, ensure_binary(User)};
 
+convert_to_gleam_msg({get_public_key, Username}) ->
+    % Gleam: GetPublicKey(username)
+    {get_public_key, ensure_binary(Username)};
+
 convert_to_gleam_msg(Other) ->
     io:format("Warning: Unknown message format: ~p~n", [Other]),
     Other.
 
+%% ============================================================================
 %% Convert Gleam reply variants to Erlang-friendly format
+%% ============================================================================
+
 convert_from_gleam_reply({ok}) -> ok;
 convert_from_gleam_reply(ok) -> ok;
 convert_from_gleam_reply({ok_with_id, Id}) -> {ok_with_id, Id};
@@ -186,6 +208,7 @@ convert_from_gleam_reply({posts_page, Posts, Page, PageSize, Total}) ->
 convert_from_gleam_reply({post_data, Post}) -> {post_data, Post};
 convert_from_gleam_reply({user_data, User}) -> {user_data, User};
 convert_from_gleam_reply({direct_messages, Messages}) -> {direct_messages, Messages};
+convert_from_gleam_reply({public_key_data, PublicKey}) -> {public_key_data, PublicKey};
 convert_from_gleam_reply(Other) -> Other.
 
 %% Helper to ensure data is a binary (Gleam string)

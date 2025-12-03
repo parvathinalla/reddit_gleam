@@ -22,7 +22,7 @@ pub fn membership_join_and_post_test() {
       assert is_member
 
       // Creating a post should succeed
-      let res_post = reddit_engine.handle_message(s2, reddit_types.CreatePost("alice", "r/foo", "Hi", "Body"))
+      let res_post = reddit_engine.handle_message(s2, reddit_types.CreatePost("alice", "r/foo", "Hi", "Body", ""))
       case res_post {
         reddit_engine.EngineResult(_, reddit_types.OkWithId(_)) -> { let _ = 0 }
         _ -> {
@@ -93,7 +93,7 @@ pub fn create_post_non_member_test() {
   let s3 = unwrap_state(reddit_engine.handle_message(s2, reddit_types.JoinSub("frank", "r/qux")))
 
   // Erin is not a member of r/qux, so creating a post should error
-  let res = reddit_engine.handle_message(s3, reddit_types.CreatePost("erin", "r/qux", "Nope", "x"))
+  let res = reddit_engine.handle_message(s3, reddit_types.CreatePost("erin", "r/qux", "Nope", "x", ""))
   case res {
     reddit_engine.EngineResult(_, reddit_types.Error(reason)) -> { assert reason == "not_member" }
     _ -> {
@@ -143,7 +143,7 @@ pub fn membership_last_member_posts_removed_test() {
   let s2 = unwrap_state(reddit_engine.handle_message(s1, reddit_types.JoinSub("alice", "r/solo")))
 
   // create a post as alice
-  let res_post = reddit_engine.handle_message(s2, reddit_types.CreatePost("alice", "r/solo", "T", "B"))
+  let res_post = reddit_engine.handle_message(s2, reddit_types.CreatePost("alice", "r/solo", "T", "B", ""))
   case res_post {
     reddit_engine.EngineResult(s3, reddit_types.OkWithId(pid)) -> {
       // alice leaves, removing the subreddit

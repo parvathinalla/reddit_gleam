@@ -16,7 +16,7 @@ pub fn list_subreddits_counts_test() {
   let s4 = unwrap_state(reddit_engine.handle_message(s3, reddit_types.JoinSub("bob", "r/a")))
 
   // create a post in r/a
-  let s5 = unwrap_state(reddit_engine.handle_message(s4, reddit_types.CreatePost("alice", "r/a", "T", "B")))
+  let s5 = unwrap_state(reddit_engine.handle_message(s4, reddit_types.CreatePost("alice", "r/a", "T", "B", "")))
 
   // create r/b with one member
   let s6 = unwrap_state(reddit_engine.handle_message(s5, reddit_types.Join("carol")))

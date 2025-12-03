@@ -12,10 +12,10 @@ fn start_inets() -> Result(a, b)
 
 pub fn main() {
   let _ = start_inets()
-
   io.println("")
   io.println("╔════════════════════════════════════════════════════════════╗")
-  io.println("║       Reddit Clone CLI Client v2.0                        ║")
+  io.println("║       Reddit Clone CLI Client v2.0 + Crypto 🔐             ║")
+  io.println("║       ⭐ BONUS: RSA-2048 Digital Signatures ⭐             ║")
   io.println("╚════════════════════════════════════════════════════════════╝")
   io.println("")
   io.println("Make sure the server is running on http://localhost:8080")
@@ -26,13 +26,16 @@ pub fn main() {
 }
 
 fn print_menu() {
+  io.println("")
+  io.println("🎁 BONUS FEATURE: All posts can be cryptographically signed!")
+  io.println("")
   io.println("Available Commands:")
-  io.println("  1  - Register user")
+  io.println("  1  - Register user (generates RSA-2048 keys) 🔐")
   io.println("  2  - Login user")
   io.println("  3  - Join subreddit")
   io.println("  4  - Leave subreddit")
-  io.println("  5  - Create post")
-  io.println("  6  - View post (with comments)")
+  io.println("  5  - Create post (SIGNED if you have keys) ✍️")
+  io.println("  6  - View post (verifies signature) ✓")
   io.println("  7  - Comment on post")
   io.println("  8  - Vote on post (upvote/downvote)")
   io.println("  9  - Get feed")
@@ -43,7 +46,6 @@ fn print_menu() {
   io.println("  q  - Quit")
   io.println("")
 }
-
 fn interactive_loop(current_user: String) {
   let user_display = case current_user {
     "" -> "Not logged in"

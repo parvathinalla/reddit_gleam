@@ -7,7 +7,7 @@ start() -> start(8080).
 
 start(Port) ->
   io:format("~n╔════════════════════════════════════════════════════════════╗~n"),
-  io:format("║       Reddit Clone REST API Server v2.0                   ║~n"),
+  io:format("║       Reddit Clone REST API Server v2.0 + Crypto          ║~n"),
   io:format("╚════════════════════════════════════════════════════════════╝~n~n"),
 
   % Start the engine
@@ -44,12 +44,13 @@ start_tcp_server(Port) ->
 
 print_endpoints() ->
   io:format("Available REST API endpoints:~n"),
-  io:format("  POST   /api/register         - Register new user~n"),
+  io:format("  POST   /api/register         - Register new user (with public key)~n"),
   io:format("  POST   /api/login            - Login user~n"),
+  io:format("  GET    /api/users/:name/publickey - Get user's public key~n"),
   io:format("  POST   /api/subreddits/:name/join   - Join subreddit~n"),
   io:format("  POST   /api/subreddits/:name/leave  - Leave subreddit~n"),
-  io:format("  POST   /api/posts            - Create new post~n"),
-  io:format("  GET    /api/posts/:id        - Get post by ID~n"),
+  io:format("  POST   /api/posts            - Create new post (with signature)~n"),
+  io:format("  GET    /api/posts/:id        - Get post by ID (verifies signature)~n"),
   io:format("  POST   /api/posts/:id/vote   - Vote on post~n"),
   io:format("  POST   /api/posts/:id/comments - Add comment~n"),
   io:format("  POST   /api/feed             - Get user feed~n"),
@@ -148,10 +149,10 @@ handle_http_request(#{method := Method, path := Path, headers := _Headers, body 
   build_response(StatusCode, ResponseBody).
 
 route_request("GET", "/", _Body) ->
-  {200, "{\"status\":\"ok\",\"version\":\"2.0\",\"message\":\"Reddit Clone API v2.0\"}"};
+  {200, "{\"status\":\"ok\",\"version\":\"2.0+crypto\",\"message\":\"Reddit Clone API v2.0 with Digital Signatures\"}"};
 
 route_request("GET", "/health", _Body) ->
-  {200, "{\"status\":\"healthy\",\"engine\":\"running\"}"};
+  {200, "{\"status\":\"healthy\",\"engine\":\"running\",\"crypto\":\"enabled\"}"};
 
 route_request("POST", "/api/register", Body) ->
   handle_register(Body);
@@ -159,8 +160,13 @@ route_request("POST", "/api/register", Body) ->
 route_request("POST", "/api/login", Body) ->
   handle_login(Body);
 
+route_request("GET", "/api/users/" ++ Rest, _Body) ->
+  case string:split(Rest, "/publickey") of
+    [Username, ""] -> handle_get_public_key(Username);
+    _ -> {404, "{\"error\":\"not_found\"}"}
+  end;
+
 route_request("POST", "/api/subreddits/" ++ Rest, Body) ->
-  % Split from the right to handle subreddit names with slashes like "r/coding"
   case string:split(Rest, "/", trailing) of
     [Name, "join"] -> handle_join_subreddit(Name, Body);
     [Name, "leave"] -> handle_leave_subreddit(Name, Body);
@@ -193,73 +199,92 @@ route_request(_Method, _Path, _Body) ->
   {404, "{\"error\":\"not_found\"}"}.
 
 %% ============= GLEAM MESSAGE CONSTRUCTORS =============
-%% These functions create proper Gleam variant types
 
-make_register_msg(Username, Password) ->
-  % Creates: Register(name: String, password: String)
-  {register, Username, Password}.
+make_register_msg(Username, Password, PublicKey) ->
+  {register, Username, Password, PublicKey}.
 
 make_login_msg(Username, Password) ->
-  % Creates: Login(name: String, password: String)
   {login, Username, Password}.
 
 make_join_sub_msg(User, Subreddit) ->
-  % Creates: JoinSub(user: String, subreddit: String)
   {join_sub, User, Subreddit}.
 
 make_leave_sub_msg(User, Subreddit) ->
-  % Creates: LeaveSub(user: String, subreddit: String)
   {leave_sub, User, Subreddit}.
 
-make_create_post_msg(Author, Subreddit, Title, Body) ->
-  % Creates: CreatePost(author, subreddit, title, body)
-  {create_post, Author, Subreddit, Title, Body}.
+make_create_post_msg(Author, Subreddit, Title, Body, Signature) ->
+  {create_post, Author, Subreddit, Title, Body, Signature}.
 
 make_vote_msg(Voter, PostId, Delta) ->
-  % Creates: Vote(voter, post_id, delta)
   {vote, Voter, PostId, Delta}.
 
 make_create_comment_msg(Author, PostId, ParentId, Body) ->
-  % Creates: CreateComment(author, post_id, parent_comment_id, body)
   {create_comment, Author, PostId, ParentId, Body}.
 
 make_get_feed_msg(User, Page, PageSize) ->
-  % Creates: GetFeed(user, page, page_size)
   {get_feed, User, Page, PageSize}.
 
 make_get_post_msg(PostId) ->
-  % Creates: GetPost(post_id)
   {get_post, PostId}.
 
 make_send_dm_msg(From, To, Body) ->
-  % Creates: SendDirectMessage(from, to, body)
   {send_direct_message, From, To, Body}.
 
 make_get_dms_msg(User) ->
-  % Creates: GetDirectMessages(user)
   {get_direct_messages, User}.
 
-%% ============= REQUEST HANDLERS =============
+make_get_public_key_msg(Username) ->
+  {get_public_key, Username}.
+
+%% ============= CRYPTO-ENABLED REQUEST HANDLERS =============
 
 handle_register(Body) ->
   case parse_json(Body) of
     {ok, Json} ->
       Username = get_json_value("username", Json, <<"unknown">>),
       Password = get_json_value("password", Json, <<"password">>),
+      PublicKey = get_json_value("public_key", Json, <<"">>),
 
-      % Convert to binaries (Gleam strings)
       UsernameBin = ensure_binary(Username),
       PasswordBin = ensure_binary(Password),
+      PublicKeyBin = ensure_binary(PublicKey),
+
+      % Generate RSA-2048 keypair if not provided
+      {FinalPublicKey, PrivateKey} = case PublicKeyBin of
+                                       <<>> ->
+                                         io:format("  ℹ Generating RSA-2048 keypair for ~s...~n", [binary_to_list(UsernameBin)]),
+                                         {PubKey, PrivKey} = reddit_crypto:generate_rsa_keypair(),
+                                         {reddit_crypto:public_key_to_string(PubKey), reddit_crypto:private_key_to_string(PrivKey)};
+                                       _ ->
+                                         io:format("  ℹ Using provided public key for ~s~n", [binary_to_list(UsernameBin)]),
+                                         {PublicKeyBin, <<"">>}
+                                     end,
 
       Ref = make_ref(),
-      Msg = make_register_msg(UsernameBin, PasswordBin),
+      Msg = make_register_msg(UsernameBin, PasswordBin, FinalPublicKey),
       reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
           UserStr = binary_to_list(UsernameBin),
-          io:format("  ✓ Registered: ~s~n", [UserStr]),
-          {201, "{\"status\":\"success\",\"username\":\"" ++ UserStr ++ "\"}"};
+          io:format("  ✓ Registered: ~s with RSA-2048 public key~n", [UserStr]),
+
+          % Build response with keys
+          PubKeyStr = binary_to_list(FinalPublicKey),
+          Response = case PrivateKey of
+                       <<>> ->
+                         % User provided their own key
+                         "{\"status\":\"success\",\"username\":\"" ++ UserStr ++
+                           "\",\"public_key\":\"" ++ PubKeyStr ++ "\"}";
+                       _ ->
+                         % We generated keys, return both
+                         PrivKeyStr = binary_to_list(PrivateKey),
+                         "{\"status\":\"success\",\"username\":\"" ++ UserStr ++
+                           "\",\"public_key\":\"" ++ PubKeyStr ++
+                           "\",\"private_key\":\"" ++ PrivKeyStr ++
+                           "\",\"warning\":\"SAVE YOUR PRIVATE KEY! You need it to sign posts. It won't be shown again.\"}"
+                     end,
+          {201, Response};
         {Ref, {error, Msg}} ->
           MsgStr = ensure_string(Msg),
           io:format("  ✗ Registration failed: ~s~n", [MsgStr]),
@@ -295,6 +320,24 @@ handle_login(Body) ->
       end;
     {error, _} ->
       {400, "{\"error\":\"invalid_json\"}"}
+  end.
+
+handle_get_public_key(Username) ->
+  Ref = make_ref(),
+  Msg = make_get_public_key_msg(list_to_binary(Username)),
+  reddit_engine_server ! {self(), Ref, Msg},
+
+  receive
+    {Ref, {public_key_data, PublicKey}} ->
+      PubKeyStr = binary_to_list(PublicKey),
+      io:format("  ✓ Public key retrieved for ~s~n", [Username]),
+      {200, "{\"username\":\"" ++ Username ++ "\",\"public_key\":\"" ++ PubKeyStr ++ "\"}"};
+    {Ref, {error, Msg}} ->
+      MsgStr = ensure_string(Msg),
+      io:format("  ✗ User not found: ~s~n", [Username]),
+      {404, "{\"error\":\"" ++ MsgStr ++ "\"}"}
+  after 5000 ->
+    {500, "{\"error\":\"timeout\"}"}
   end.
 
 handle_join_subreddit(Name, Body) ->
@@ -352,18 +395,46 @@ handle_create_post(Body) ->
       Subreddit = ensure_binary(get_json_value("subreddit", Json, <<"general">>)),
       Title = ensure_binary(get_json_value("title", Json, <<"Untitled">>)),
       PostBody = ensure_binary(get_json_value("body", Json, <<"">>)),
+      PrivateKeyStr = get_json_value("private_key", Json, <<"">>),
+      ProvidedSignature = get_json_value("signature", Json, <<"">>),
+
+      % Create message to sign (concatenate author + title + body)
+      MessageToSign = binary_to_list(Username) ++ binary_to_list(Title) ++ binary_to_list(PostBody),
+
+      % Generate or use provided signature
+      Signature = case {ProvidedSignature, PrivateKeyStr} of
+                    {<<>>, <<>>} ->
+                      io:format("  ⚠ No signature or private key provided for post~n"),
+                      <<"unsigned">>;
+                    {<<>>, PrivKey} ->
+                      % Sign the post with provided private key
+                      io:format("  🔐 Signing post with private key...~n"),
+                      case reddit_crypto:sign_message(MessageToSign, PrivKey) of
+                        {error, Reason} ->
+                          io:format("  ✗ Signing failed: ~p~n", [Reason]),
+                          <<"unsigned">>;
+                        Sig ->
+                          io:format("  ✓ Post signed successfully~n"),
+                          Sig
+                      end;
+                    {Sig, _} ->
+                      io:format("  ℹ Using provided signature~n"),
+                      Sig
+                  end,
 
       Ref = make_ref(),
-      Msg = make_create_post_msg(Username, Subreddit, Title, PostBody),
+      Msg = make_create_post_msg(Username, Subreddit, Title, PostBody, Signature),
       reddit_engine_server ! {self(), Ref, Msg},
 
       receive
         {Ref, ok} ->
           io:format("  ✓ Post created by ~s in ~s~n", [binary_to_list(Username), binary_to_list(Subreddit)]),
-          {201, "{\"status\":\"success\",\"message\":\"Post created\"}"};
+          SigStatus = build_signature_status(Signature),
+          {201, "{\"status\":\"success\",\"message\":\"Post created\"" ++ SigStatus ++ "}"};
         {Ref, {ok_with_id, PostId}} ->
           io:format("  ✓ Post #~p created by ~s in ~s~n", [PostId, binary_to_list(Username), binary_to_list(Subreddit)]),
-          {201, "{\"status\":\"success\",\"post_id\":" ++ integer_to_list(PostId) ++ "}"};
+          SigStatus = build_signature_status(Signature),
+          {201, "{\"status\":\"success\",\"post_id\":" ++ integer_to_list(PostId) ++ SigStatus ++ "}"};
         {Ref, {error, Msg}} ->
           MsgStr = ensure_string(Msg),
           {400, "{\"status\":\"error\",\"message\":\"" ++ MsgStr ++ "\"}"}
@@ -372,6 +443,13 @@ handle_create_post(Body) ->
       end;
     {error, _} ->
       {400, "{\"error\":\"invalid_json\"}"}
+  end.
+
+build_signature_status(Signature) ->
+  case Signature of
+    <<"unsigned">> -> ",\"signature_status\":\"unsigned\",\"warning\":\"Post is not signed!\"";
+    <<"">> -> ",\"signature_status\":\"failed\",\"error\":\"Signature generation failed\"";
+    _ -> ",\"signature_status\":\"signed\",\"signature\":\"" ++ binary_to_list(Signature) ++ "\""
   end.
 
 handle_get_post(IdStr) ->
@@ -384,8 +462,12 @@ handle_get_post(IdStr) ->
       receive
         {Ref, {post_data, Post}} ->
           io:format("  ✓ Post #~p retrieved~n", [Id]),
-          % Serialize the actual post data
-          PostJson = serialize_post(Post),
+
+          % Verify signature before returning
+          VerificationResult = verify_post_signature(Post),
+
+          % Serialize post with verification status
+          PostJson = serialize_post_with_verification(Post, VerificationResult),
           {200, "{\"post\":" ++ PostJson ++ "}"};
         {Ref, {error, Msg}} ->
           MsgStr = ensure_string(Msg),
@@ -396,6 +478,76 @@ handle_get_post(IdStr) ->
       end;
     _ ->
       {400, "{\"error\":\"invalid_post_id\"}"}
+  end.
+
+verify_post_signature(Post) ->
+  case Post of
+    {post, _Id, Author, _Subreddit, Title, Body, _Score, _Comments, _Timestamp, Signature} ->
+      case Signature of
+        <<"unsigned">> ->
+          io:format("  ⚠ Post is unsigned~n"),
+          {unsigned, "Post was not signed"};
+        <<"">> ->
+          io:format("  ⚠ Post has empty signature~n"),
+          {unsigned, "Post signature is empty"};
+        _ ->
+          % Get author's public key
+          Ref = make_ref(),
+          Msg = make_get_public_key_msg(Author),
+          reddit_engine_server ! {self(), Ref, Msg},
+
+          receive
+            {Ref, {public_key_data, PublicKey}} ->
+              % Reconstruct the message that was signed
+              MessageToVerify = binary_to_list(Author) ++ binary_to_list(Title) ++ binary_to_list(Body),
+
+              % Verify the signature
+              case reddit_crypto:verify_signature(MessageToVerify, Signature, PublicKey) of
+                true ->
+                  io:format("  ✓ Signature verified for post by ~s~n", [binary_to_list(Author)]),
+                  {valid, "Signature is valid"};
+                false ->
+                  io:format("  ✗ Invalid signature for post by ~s~n", [binary_to_list(Author)]),
+                  {invalid, "Signature verification failed"}
+              end;
+            {Ref, {error, _}} ->
+              io:format("  ✗ Could not retrieve public key for ~s~n", [binary_to_list(Author)]),
+              {error, "Author's public key not found"}
+          after 2000 ->
+            {error, "Timeout retrieving public key"}
+          end
+      end;
+    _ ->
+      {error, "Invalid post format"}
+  end.
+
+serialize_post_with_verification(Post, VerificationResult) ->
+  case Post of
+    {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp, Signature} ->
+      AuthorStr = ensure_string(Author),
+      SubredditStr = ensure_string(Subreddit),
+      TitleStr = escape_json_string(ensure_string(Title)),
+      BodyStr = escape_json_string(ensure_string(Body)),
+      CommentsJson = serialize_comments(Comments),
+      SigStr = escape_json_string(ensure_string(Signature)),
+
+      % Add verification status
+      {VerifStatus, VerifMsg} = VerificationResult,
+      VerifStatusStr = atom_to_list(VerifStatus),
+
+      "{\"id\":" ++ integer_to_list(Id) ++
+        ",\"author\":\"" ++ AuthorStr ++ "\"" ++
+        ",\"subreddit\":\"" ++ SubredditStr ++ "\"" ++
+        ",\"title\":\"" ++ TitleStr ++ "\"" ++
+        ",\"body\":\"" ++ BodyStr ++ "\"" ++
+        ",\"score\":" ++ integer_to_list(Score) ++
+        ",\"comments\":" ++ CommentsJson ++
+        ",\"timestamp\":" ++ integer_to_list(Timestamp) ++
+        ",\"signature\":\"" ++ SigStr ++ "\"" ++
+        ",\"signature_status\":\"" ++ VerifStatusStr ++ "\"" ++
+        ",\"signature_message\":\"" ++ VerifMsg ++ "\"}";
+    _ ->
+      "{\"error\":\"invalid_post_format\"}"
   end.
 
 handle_vote_post(IdStr, Body) ->
@@ -480,8 +632,15 @@ handle_get_feed(Body) ->
       receive
         {Ref, {posts_page, Posts, Page, _PageSize, Total}} ->
           io:format("  ✓ Feed for ~s: ~p posts~n", [binary_to_list(Username), Total]),
-          % Convert posts to JSON
-          PostsJson = serialize_posts(Posts),
+
+          % Verify signatures for all posts in feed
+          PostsWithVerification = lists:map(fun(Post) ->
+            VerifResult = verify_post_signature(Post),
+            {Post, VerifResult}
+                                            end, Posts),
+
+          % Serialize posts with verification status
+          PostsJson = serialize_posts_with_verification(PostsWithVerification),
           {200, "{\"posts\":" ++ PostsJson ++ ",\"page\":" ++ integer_to_list(Page) ++ ",\"total\":" ++ integer_to_list(Total) ++ "}"};
         {Ref, {error, Msg}} ->
           MsgStr = ensure_string(Msg),
@@ -491,6 +650,16 @@ handle_get_feed(Body) ->
       end;
     {error, _} ->
       {400, "{\"error\":\"invalid_json\"}"}
+  end.
+
+serialize_posts_with_verification(PostsWithVerif) ->
+  case PostsWithVerif of
+    [] -> "[]";
+    _ ->
+      SerializedList = lists:map(fun({Post, VerifResult}) ->
+        serialize_post_with_verification(Post, VerifResult)
+                                 end, PostsWithVerif),
+      "[" ++ string:join(SerializedList, ",") ++ "]"
   end.
 
 handle_get_messages(Body) ->
@@ -624,7 +793,24 @@ serialize_posts(Posts) ->
 
 serialize_post(Post) ->
   case Post of
+    {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp, Signature} ->
+      AuthorStr = ensure_string(Author),
+      SubredditStr = ensure_string(Subreddit),
+      TitleStr = escape_json_string(ensure_string(Title)),
+      BodyStr = escape_json_string(ensure_string(Body)),
+      CommentsJson = serialize_comments(Comments),
+      SigStr = escape_json_string(ensure_string(Signature)),
+      "{\"id\":" ++ integer_to_list(Id) ++
+        ",\"author\":\"" ++ AuthorStr ++ "\"" ++
+        ",\"subreddit\":\"" ++ SubredditStr ++ "\"" ++
+        ",\"title\":\"" ++ TitleStr ++ "\"" ++
+        ",\"body\":\"" ++ BodyStr ++ "\"" ++
+        ",\"score\":" ++ integer_to_list(Score) ++
+        ",\"comments\":" ++ CommentsJson ++
+        ",\"timestamp\":" ++ integer_to_list(Timestamp) ++
+        ",\"signature\":\"" ++ SigStr ++ "\"}";
     {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp} ->
+      % Handle old format without signature
       AuthorStr = ensure_string(Author),
       SubredditStr = ensure_string(Subreddit),
       TitleStr = escape_json_string(ensure_string(Title)),
@@ -637,7 +823,8 @@ serialize_post(Post) ->
         ",\"body\":\"" ++ BodyStr ++ "\"" ++
         ",\"score\":" ++ integer_to_list(Score) ++
         ",\"comments\":" ++ CommentsJson ++
-        ",\"timestamp\":" ++ integer_to_list(Timestamp) ++ "}";
+        ",\"timestamp\":" ++ integer_to_list(Timestamp) ++
+        ",\"signature\":\"unsigned\"}";
     _ ->
       "{\"error\":\"invalid_post_format\"}"
   end.
@@ -681,10 +868,3 @@ escape_json_string([H | T], Acc) ->
     $\t -> escape_json_string(T, [$t, $\\ | Acc]);
     _ -> escape_json_string(T, [H | Acc])
   end.
-
-%% Count list length (for comments)
-length_of_list(List) ->
-  length_of_list(List, 0).
-
-length_of_list([], Count) -> Count;
-length_of_list([_ | Rest], Count) -> length_of_list(Rest, Count + 1).

@@ -5,6 +5,7 @@ pub type User {
   inbox: List(DirectMessage),
   subreddits: List(String),
   password: String,
+  public_key: String,  // ← ADDED for bonus
   )
 }
 
@@ -22,6 +23,7 @@ pub type Post {
   score: Int,
   comments: List(Comment),
   timestamp: Int,
+  signature: String,  // ← ADDED for bonus
   )
 }
 
@@ -49,9 +51,15 @@ pub type EngineMsg {
   Join(name: String)
   JoinSub(user: String, subreddit: String)
   LeaveSub(user: String, subreddit: String)
-  CreatePost(author: String, subreddit: String, title: String, body: String)
+  CreatePost(
+  author: String,
+  subreddit: String,
+  title: String,
+  body: String,
+  signature: String,  // ← ADDED for bonus
+  )
   Vote(voter: String, post_id: Int, delta: Int)
-  Register(name: String, password: String)  // Only 2 parameters!
+  Register(name: String, password: String, public_key: String)  // ← UPDATED for bonus
   Login(name: String, password: String)
   GetFeed(user: String, page: Int, page_size: Int)
   GetSubFeed(subreddit: String)
@@ -64,6 +72,7 @@ pub type EngineMsg {
   )
   SendDirectMessage(from: String, to: String, body: String)
   GetDirectMessages(user: String)
+  GetPublicKey(username: String)  // ← ADDED for bonus
 }
 
 // Replies the engine can return for a request
@@ -76,4 +85,5 @@ pub type EngineReply {
   PostData(Post)
   UserData(User)
   DirectMessages(List(DirectMessage))
+  PublicKeyData(String)  // ← ADDED for bonus
 }
