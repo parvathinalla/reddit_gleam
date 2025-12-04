@@ -3,6 +3,9 @@
 ## Overview
 Part 2 focuses on **comprehensive REST API testing**, **enhanced output formatting**, and **production-ready deployment**. This document details all additions and improvements made in Part 2.
 
+## Team Members
+Bindhu Sree Reddy Alla (UFID: 54455430)
+Parvati Nalla (UFID: 80911450)
 ---
 
 ## Part 2 Highlights
