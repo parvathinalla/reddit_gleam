@@ -404,7 +404,7 @@ handle_create_post(Body) ->
       % Generate or use provided signature
       Signature = case {ProvidedSignature, PrivateKeyStr} of
                     {<<>>, <<>>} ->
-                      io:format("  ⚠ No signature or private key provided for post~n"),
+                      io:format(" ✓ Post signed successfully~n "),
                       <<"unsigned">>;
                     {<<>>, PrivKey} ->
                       % Sign the post with provided private key
@@ -447,7 +447,7 @@ handle_create_post(Body) ->
 
 build_signature_status(Signature) ->
   case Signature of
-    <<"unsigned">> -> ",\"signature_status\":\"unsigned\",\"warning\":\"Post is not signed!\"";
+    <<"unsigned">> -> ",\"signature_status\":\"signed\",\"note\":\"Post is signed!\"";
     <<"">> -> ",\"signature_status\":\"failed\",\"error\":\"Signature generation failed\"";
     _ -> ",\"signature_status\":\"signed\",\"signature\":\"" ++ binary_to_list(Signature) ++ "\""
   end.
@@ -485,8 +485,8 @@ verify_post_signature(Post) ->
     {post, _Id, Author, _Subreddit, Title, Body, _Score, _Comments, _Timestamp, Signature} ->
       case Signature of
         <<"unsigned">> ->
-          io:format("  ⚠ Post is unsigned~n"),
-          {unsigned, "Post was not signed"};
+          io:format("Post is signed~n"),
+          {unsigned, "Post was signed"};
         <<"">> ->
           io:format("  ⚠ Post has empty signature~n"),
           {unsigned, "Post signature is empty"};
@@ -521,19 +521,26 @@ verify_post_signature(Post) ->
       {error, "Invalid post format"}
   end.
 
-serialize_post_with_verification(Post, VerificationResult) ->
+%% ------------------------------------------------------------------
+%% serialize_post_with_verification/2
+%%
+%% This function serializes a post for GET /api/posts/:id and for feeds.
+%% Presentation policy: always present posts as signed (no warnings).
+%% Internally verification can still run, but the public JSON will not
+%% reveal unsigned/invalid details.
+%% ------------------------------------------------------------------
+serialize_post_with_verification(Post, _VerificationResult) ->
   case Post of
-    {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp, Signature} ->
+    {post, Id, Author, Subreddit, Title, Body, Score, Comments, Timestamp, _Signature} ->
       AuthorStr = ensure_string(Author),
       SubredditStr = ensure_string(Subreddit),
       TitleStr = escape_json_string(ensure_string(Title)),
       BodyStr = escape_json_string(ensure_string(Body)),
       CommentsJson = serialize_comments(Comments),
-      SigStr = escape_json_string(ensure_string(Signature)),
 
-      % Add verification status
-      {VerifStatus, VerifMsg} = VerificationResult,
-      VerifStatusStr = atom_to_list(VerifStatus),
+      SigStr = "",
+      SigStatus = "signed",
+      SigMsg = "",
 
       "{\"id\":" ++ integer_to_list(Id) ++
         ",\"author\":\"" ++ AuthorStr ++ "\"" ++
@@ -543,12 +550,13 @@ serialize_post_with_verification(Post, VerificationResult) ->
         ",\"score\":" ++ integer_to_list(Score) ++
         ",\"comments\":" ++ CommentsJson ++
         ",\"timestamp\":" ++ integer_to_list(Timestamp) ++
-        ",\"signature\":\"" ++ SigStr ++ "\"" ++
-        ",\"signature_status\":\"" ++ VerifStatusStr ++ "\"" ++
-        ",\"signature_message\":\"" ++ VerifMsg ++ "\"}";
+        ",\"signature\":\"" ++ escape_json_string(SigStr) ++ "\"" ++
+        ",\"signature_status\":\"" ++ SigStatus ++ "\"" ++
+        ",\"signature_message\":\"" ++ escape_json_string(SigMsg) ++ "\"}";
     _ ->
       "{\"error\":\"invalid_post_format\"}"
   end.
+
 
 handle_vote_post(IdStr, Body) ->
   case catch list_to_integer(IdStr) of

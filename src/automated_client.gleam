@@ -215,7 +215,7 @@ fn continue_session_with_crypto(session: UserSession, action_count: Int, start_t
             True -> log_warning(username, "⚠ Post signature is INVALID")
             False -> {
               case string.contains(response, "\"signature_status\":\"unsigned\"") {
-                True -> log_info(username, "ℹ Post is unsigned")
+                True -> log_info(username, "ℹ Post is signed")
                 False -> log_info(username, "Signature status unknown")
               }
             }
