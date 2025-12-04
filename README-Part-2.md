@@ -82,7 +82,7 @@ cd /Users/bindhu/Desktop/Bindhu/Projects/reddit_gleam
 
 **Or directly:**
 ```bash
-gleam run -m reddit_cli_client
+./scripts/start_client.sh
 ```
 
 **Expected Output:**
@@ -93,14 +93,22 @@ gleam run -m reddit_cli_client
 
 Make sure the server is running on http://localhost:8080
 
-Commands:
-  1 - Register user
-  2 - Login user
-  3 - Join subreddit
-  4 - Create post
-  5 - Get feed
-  d - Run demo (automated)
-  q - Quit
+Available Commands:
+  1  - Register user (generates RSA-2048 keys) 🔐
+  2  - Login user
+  3  - Join subreddit
+  4  - Leave subreddit
+  5  - Create post (SIGNED if you have keys) ✍️
+  6  - View post (verifies signature) ✓
+  7  - Comment on post
+  8  - Vote on post (upvote/downvote)
+  9  - Get feed
+  10 - Send direct message
+  11 - View direct messages
+  d  - Run automated demo
+  h  - Show this help menu
+  q  - Quit
+
 
 [Not logged in] Choice: 
 ```
